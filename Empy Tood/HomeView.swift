@@ -12,7 +12,7 @@ enum DeskCardMetrics {
     static let cornerRadius: CGFloat = 5
 }
 
-/// The Home screen: greeting up top, today's completion ring opposite it,
+/// The Home screen: greeting and activity heatmap up top,
 /// the intentionally messy sticky fan bottom-left, and a direct new-list
 /// action bottom-right. No chrome at all — settings lives in the status-bar
 /// menu set up during onboarding.
@@ -22,12 +22,15 @@ enum DeskCardMetrics {
 struct HomeView: View {
     // The fixed card fan, focus control, greeting, actions, and a two-line
     // announcement all fit without compression at this content size.
-    static let minimumSize = CGSize(width: 720, height: 600)
+    static let minimumSize = CGSize(width: 720, height: 770)
 
     let manager: StickyManager
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var locationLabel: String?
+    @State private var overviewStickyIDs: Set<UUID> = []
+    @State private var showingStickyFilter = false
+    @State private var stickySearch = ""
     private var archivedEntries: [ArchivedSticky] { manager.archivedStickies }
 
     private let desk = Color(hex: 0xFBF8F1)
@@ -46,8 +49,7 @@ struct HomeView: View {
                         VStack(spacing: 0) {
                             dashboard(scrollProxy: scrollProxy)
                                 .frame(
-                                    width: viewport.size.width,
-                                    height: max(viewport.size.height, Self.minimumSize.height)
+                                    width: viewport.size.width
                                 )
                             archivedSection
                                 .frame(width: viewport.size.width)
@@ -76,7 +78,15 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 0) {
                 announcementBanner
                 topRow
-                Spacer(minLength: 24)
+                VStack(spacing: 18) {
+                    overviewHeader.zIndex(2)
+                    sectionDivider
+                    HomeAchievementsView(manager: manager, selectedStickyIDs: overviewStickyIDs)
+                        .frame(height: 190)
+                }
+                .padding(.top, 58)
+                .zIndex(2)
+                Color.clear.frame(height: 58)
                 bottomRow
             }
             .animation(.easeInOut(duration: 0.25), value: AnnouncementService.shared.current)
@@ -84,18 +94,121 @@ struct HomeView: View {
             .padding(.top, 30)
             .padding(.bottom, 44)
 
-            // Floats independently of the fan/pill column below so the
-            // primary creation action always stays in the same corner.
-            newToDoListButton
-                .padding(.horizontal, 44)
-                .padding(.bottom, 44)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
 
-            archiveButton(scrollProxy: scrollProxy)
-                .padding(.horizontal, 44)
-                .padding(.bottom, 44)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
+    }
+
+    private var overviewStickies: [(id: UUID, title: String)] {
+        let live = manager.order.compactMap { id -> (id: UUID, title: String)? in
+            guard let model = manager.controllers[id]?.model else { return nil }
+            return (id, model.title.isEmpty ? "To Do" : model.title)
+        }
+        return live + manager.archivedStickies.map { ($0.data.id, $0.data.title.isEmpty ? "To Do" : $0.data.title) }
+    }
+
+    private var overviewFilterLabel: String {
+        if overviewStickyIDs.isEmpty { return "All stickies" }
+        if overviewStickyIDs.count == 1 {
+            return overviewStickies.first { overviewStickyIDs.contains($0.id) }?.title ?? "1 sticky"
+        }
+        return "\(overviewStickyIDs.count) stickies"
+    }
+
+    private var overviewHeader: some View {
+        HStack {
+            Text("Overview").font(.system(size: 20, weight: .medium))
+            Spacer()
+            HStack(spacing: 6) {
+                Button { showingStickyFilter = true } label: {
+                    HStack(spacing: 8) {
+                        Text(overviewFilterLabel).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
+                    }
+                    .padding(.leading, 12)
+                    .padding(.trailing, overviewStickyIDs.isEmpty ? 12 : 0)
+                    .frame(height: 30)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if !overviewStickyIDs.isEmpty {
+                    Button { overviewStickyIDs.removeAll() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 26, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear sticky filter")
+                }
+            }
+            .font(.system(size: 12))
+            .background(desk, in: Capsule())
+            .overlay(Capsule().stroke(Color.primary.opacity(0.15), lineWidth: 1))
+            .frame(maxWidth: 240, alignment: .trailing)
+            .overlay(alignment: .topTrailing) {
+                if showingStickyFilter {
+                    stickyFilterMenu
+                        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
+                        .background(StickyFilterDismissTarget { showingStickyFilter = false })
+                        .offset(y: 38)
+                        .onExitCommand { showingStickyFilter = false }
+                }
+            }
+        }
+    }
+
+    private var stickyFilterMenu: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search stickies…", text: $stickySearch).textFieldStyle(.plain)
+                if !overviewStickyIDs.isEmpty {
+                    Button { overviewStickyIDs.removeAll() } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear sticky filter")
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.2)))
+            ScrollView {
+                LazyVStack(spacing: 3) {
+                    ForEach(overviewStickies.filter { stickySearch.isEmpty || $0.title.localizedCaseInsensitiveContains(stickySearch) }, id: \.id) { sticky in
+                        Button {
+                            if overviewStickyIDs.contains(sticky.id) { overviewStickyIDs.remove(sticky.id) }
+                            else { overviewStickyIDs.insert(sticky.id) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(sticky.title).lineLimit(2).multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                                Image(systemName: "checkmark")
+                                    .opacity(overviewStickyIDs.contains(sticky.id) ? 1 : 0)
+                                    .frame(width: 12)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 7)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(overviewStickyIDs.contains(sticky.id) ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(overviewStickyIDs.contains(sticky.id) ? "Selected" : "Not selected")
+                    }
+                    if !stickySearch.isEmpty && !overviewStickies.contains(where: { $0.title.localizedCaseInsensitiveContains(stickySearch) }) {
+                        Text("No matching stickies").foregroundStyle(.secondary).padding(12)
+                    }
+                }
+            }
+            .frame(height: 240)
+        }
+        .font(.system(size: 13))
+        .padding(8)
+        .frame(width: 250)
+        .fixedSize(horizontal: false, vertical: true)
+        .onDisappear { stickySearch = "" }
     }
 
     // MARK: - Announcement banner (see AnnouncementService)
@@ -130,80 +243,22 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Top: greeting (+ quiet location) and daily progress
+    // MARK: - Greeting and date
 
     private var topRow: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .center, spacing: 24) {
                 Text(greeting)
                     .font(.system(size: 40, weight: .medium))
-                Text(dateLine)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Spacer(minLength: 0)
+                newToDoListButton.fixedSize()
             }
-            Spacer()
-            dailyProgressRing
+            Text(dateLine)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
         }
-    }
-
-    private var completedCount: Int { manager.tasksCompletedToday }
-    private var totalTaskCount: Int { completedCount + manager.unfinishedTaskCount }
-    private var completionProgress: Double {
-        guard totalTaskCount > 0 else { return 0 }
-        return min(1, Double(completedCount) / Double(totalTaskCount))
-    }
-
-    /// The full track is the day's total workload; the green arc is the
-    /// completed share. The numbers remain explicit so progress is never
-    /// communicated by color alone.
-    private var dailyProgressRing: some View {
-        ZStack {
-            Circle()
-                .stroke(Color(hex: 0x20211E).opacity(0.12), lineWidth: 7)
-            Circle()
-                .trim(from: 0, to: completionProgress)
-                .stroke(
-                    Color(hex: 0x17C862),
-                    style: StrokeStyle(lineWidth: 7, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-
-            VStack(spacing: -1) {
-                Text("\(completedCount)")
-                    .font(.custom("HelveticaNeue-Medium", size: 22))
-                Text("of \(totalTaskCount)")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 82, height: 82)
-        .animation(.easeInOut(duration: 0.25), value: completionProgress)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(completedCount) of \(totalTaskCount) to-do items done")
-    }
-
-    /// Quiet, always-there — finished stickies you archived (instead of
-    /// deleted) from the close confirmation live here. Floats in the
-    /// bottom-left corner, opposite the new-list action.
-    private func archiveButton(scrollProxy: ScrollViewProxy) -> some View {
-        Button {
-            let revealArchive = {
-                scrollProxy.scrollTo(Self.archiveSectionID, anchor: .bottom)
-            }
-            if reduceMotion {
-                revealArchive()
-            } else {
-                withAnimation(.easeInOut(duration: 0.36), revealArchive)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "archivebox")
-                Text("Archive")
-            }
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Inline archive
@@ -213,10 +268,6 @@ struct HomeView: View {
     /// leaving the lower part of Home visible above it for spatial context.
     private var archivedSection: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Rectangle()
-                .fill(Color(hex: 0x20211E).opacity(0.1))
-                .frame(height: 1)
-
             HStack(alignment: .firstTextBaseline) {
                 Text("Archived Stickies")
                     .font(.system(size: 20, weight: .medium))
@@ -229,10 +280,11 @@ struct HomeView: View {
                     .foregroundStyle(.secondary)
             }
 
-            archivedStickiesFan
+            sectionDivider
+            archivedStickiesFan.padding(.top, 54)
         }
         .padding(.horizontal, 44)
-        .padding(.top, 18)
+        .padding(.top, 14)
         .padding(.bottom, 44)
         .frame(minHeight: 330, alignment: .topLeading)
     }
@@ -253,7 +305,7 @@ struct HomeView: View {
                 GeometryReader { proxy in
                     ZStack(alignment: .topLeading) {
                         let positions = StickyFanLayout.positions(
-                            count: archivedEntries.count,
+                            count: max(manager.order.count, archivedEntries.count),
                             availableWidth: proxy.size.width,
                             cardWidth: DeskCardMetrics.width
                         )
@@ -315,10 +367,25 @@ struct HomeView: View {
     }
 
     // MARK: - Bottom stickies
-    // (the new-list button floats independently, see `body`)
 
     private var bottomRow: some View {
-        stickiesFan
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("All stickies")
+                    .font(.system(size: 20, weight: .medium))
+                Text("\(manager.order.count)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            sectionDivider
+            stickiesFan.padding(.top, 54)
+        }
+    }
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(Color(hex: 0x20211E).opacity(0.1))
+            .frame(height: 1)
     }
 
     /// No scroll view, no clipping, no fade — the fan just gets denser as
@@ -332,21 +399,15 @@ struct HomeView: View {
             } else {
                 GeometryReader { proxy in
                     ZStack(alignment: .topLeading) {
-                        let count = manager.order.count
                         let positions = StickyFanLayout.positions(
-                            count: count,
+                            count: max(manager.order.count, archivedEntries.count),
                             availableWidth: proxy.size.width,
                             cardWidth: DeskCardMetrics.width
                         )
                         ForEach(Array(manager.order.enumerated()), id: \.element) { index, id in
                             if let controller = manager.controllers[id] {
-                                let shortcut = StickySelectionShortcut
-                                    .keyEquivalent(forStickyIndex: index)
-                                    .map { "⌃\($0)" }
                                 StickyDeskCard(
                                     model: controller.model,
-                                    shortcutLabel: shortcut,
-                                    hoverLiftDistance: 66,
                                     onShow: { manager.bringToFront(id) }
                                 )
                                     .rotationEffect(.degrees(rotation(for: index)))
@@ -440,8 +501,7 @@ struct HomeView: View {
 struct StickyDeskCard: View {
     let model: StickyModel
     var hoverHint: String = "Pop out"
-    var shortcutLabel: String? = nil
-    var hoverLiftDistance: CGFloat = 9
+    var hoverLiftDistance: CGFloat = 66
     var onShow: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -493,16 +553,6 @@ struct StickyDeskCard: View {
             .scaleEffect(hovering && !reduceMotion ? 1.02 : 1)
             .offset(y: hoverLift)
 
-            if let shortcutLabel {
-                Text(shortcutLabel)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color(hex: 0x20211E).opacity(0.48))
-                    .frame(width: DeskCardMetrics.width, alignment: .center)
-                    .offset(y: hoverLift - 40)
-                    .opacity(hovering ? 1 : 0)
-                    .accessibilityHidden(true)
-            }
-
             if hoveringCorner {
                 Text(hoverHint)
                     .font(.system(size: 10, weight: .medium))
@@ -537,5 +587,47 @@ struct StickyDeskCard: View {
 
     private var hoverLift: CGFloat {
         hovering && !reduceMotion ? -hoverLiftDistance : 0
+    }
+}
+
+/// Dismiss the arrowless filter on outside clicks, without intercepting its rows.
+private struct StickyFilterDismissTarget: NSViewRepresentable {
+    let dismiss: () -> Void
+
+    func makeNSView(context: Context) -> Target {
+        let view = Target()
+        view.dismiss = dismiss
+        return view
+    }
+    func updateNSView(_ nsView: Target, context: Context) { nsView.dismiss = dismiss }
+    static func dismantleNSView(_ nsView: Target, coordinator: ()) { nsView.stop() }
+
+    final class Target: NSView {
+        var dismiss: (() -> Void)?
+        private var local: Any?
+        private var global: Any?
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                guard let self else { return event }
+                if event.window !== self.window || !self.bounds.contains(self.convert(event.locationInWindow, from: nil)) {
+                    self.dismiss?()
+                }
+                return event
+            }
+            global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                self?.dismiss?()
+            }
+        }
+        func stop() {
+            if let local { NSEvent.removeMonitor(local) }
+            if let global { NSEvent.removeMonitor(global) }
+            local = nil
+            global = nil
+        }
+        deinit { stop() }
     }
 }

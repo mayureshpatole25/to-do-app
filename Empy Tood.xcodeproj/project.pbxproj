@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXFileReference section */
@@ -11,7 +11,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		C100000000000000000000C1 /* Exceptions for "Empy Tood" folder in "Empy Tood" target */ = {
+		C100000000000000000000C1 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -21,14 +21,7 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		A600000000000000000000A6 /* Empy Tood */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				C100000000000000000000C1 /* Exceptions for "Empy Tood" folder in "Empy Tood" target */,
-			);
-			path = "Empy Tood";
-			sourceTree = "<group>";
-		};
+		A600000000000000000000A6 /* Empy Tood */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (C100000000000000000000C1 /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = "Empy Tood"; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -107,10 +100,9 @@
 				Base,
 			);
 			mainGroup = A300000000000000000000A3;
+			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 			);
-			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			productRefGroup = A400000000000000000000A4 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -280,7 +272,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = A100000000000000000000A1 /* Project object */;
 }

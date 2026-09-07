@@ -717,6 +717,7 @@ final class StickyController: NSObject, NSWindowDelegate {
         }
         completionUndoManager.setActionName(isDone ? "Complete Task" : "Reopen Task")
         model.setDone(id, isDone: isDone, completedAt: completedAt)
+        manager?.recordCompletion(item, on: self, isDone: isDone, completedAt: completedAt)
     }
 
     /// Genie-effect minimizes to the Dock, same as any other window —
@@ -726,6 +727,8 @@ final class StickyController: NSObject, NSWindowDelegate {
     /// Close only hides this window. The sticky and all of its contents stay
     /// in the manager and on disk, so it can be opened again from Home.
     func closeSticky() { manager?.close(model.id) }
+    func openAchievements() { manager?.openAchievements() }
+    func dismissAchievementNotice() { manager?.dismissAchievementNotice() }
 
     /// The dedicated archive button is an explicit action, so it skips the
     /// close-behavior chooser and archives this sticky directly.

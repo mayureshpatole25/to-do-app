@@ -21,6 +21,8 @@ final class StickyManager {
     private(set) var archivedStickies: [ArchivedSticky] = []
 
     @ObservationIgnored private let persistence = PersistenceService()
+    private(set) var completionHistory: CompletionHistory?
+    @ObservationIgnored private let celebrationPresenter = CelebrationPresenter()
     let stickyArchive = StickyArchiveService()
     @ObservationIgnored private var rollover: RolloverScheduler?
 
@@ -29,6 +31,7 @@ final class StickyManager {
     @ObservationIgnored private let lastActiveDefaultsKey = "today.lastActiveStickyID"
     @ObservationIgnored private var recentlyClosedIDs: [UUID] = []
     @ObservationIgnored var onOpenHome: (() -> Void)?
+    @ObservationIgnored var onOpenAchievements: (() -> Void)?
 
     init() {
         refreshArchivedStickies()
@@ -69,6 +72,7 @@ final class StickyManager {
             }
         }
         advanceRecurringTasks()
+        loadCompletionHistory()
         recurrenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.advanceRecurringTasks() }
         }
@@ -79,6 +83,91 @@ final class StickyManager {
         let controller = StickyController(model: model, manager: self)
         controllers[model.id] = controller
         order.append(model.id)
+    }
+
+    private func loadCompletionHistory() {
+        do {
+            var history = try CompletionHistoryStore.load()
+            var entries: [CompletionRecord] = []
+            let snapshots = order.compactMap { controllers[$0]?.model.snapshot() } + archivedStickies.map(\.data)
+            for sticky in snapshots {
+                for item in sticky.items where !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if item.isDone, let date = item.completedAt {
+                        entries.append(CompletionRecord(id: item.id,
+                            key: CompletionHistory.key(itemID: item.id, scheduledAt: item.recurrence == nil ? nil : item.dueDate),
+                            text: item.text, color: sticky.colorID.rawValue, completedAt: date))
+                    }
+                    for occurrence in item.occurrenceHistory ?? [] where occurrence.wasCompleted {
+                        if let date = occurrence.completedAt {
+                            entries.append(CompletionRecord(id: UUID(),
+                                key: CompletionHistory.key(itemID: item.id, scheduledAt: occurrence.scheduledAt),
+                                text: item.text, color: sticky.colorID.rawValue, completedAt: date))
+                        }
+                    }
+                }
+            }
+            history.seed(entries)
+            history.registerCreated(createdTaskKeys())
+            history.registerOwners(taskStickyOwners())
+            try CompletionHistoryStore.save(history)
+            completionHistory = history
+        } catch {
+            NSLog("Completion history could not be loaded; preserving existing file: %@", error.localizedDescription)
+        }
+    }
+
+    func openAchievements() {
+        celebrationPresenter.dismiss()
+        onOpenAchievements?()
+    }
+
+    func dismissAchievementNotice() { celebrationPresenter.dismiss() }
+
+    private func taskStickyOwners() -> [String: UUID] {
+        let snapshots = order.compactMap { controllers[$0]?.model.snapshot() } + archivedStickies.map(\.data)
+        var owners: [String: UUID] = [:]
+        for sticky in snapshots {
+            for item in sticky.items { owners[item.id.uuidString] = sticky.id }
+        }
+        return owners
+    }
+
+    private func createdTaskKeys() -> Set<String> {
+        let snapshots = order.compactMap { controllers[$0]?.model.snapshot() } + archivedStickies.map(\.data)
+        var keys: Set<String> = []
+        for sticky in snapshots {
+            for item in sticky.items where !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                keys.insert(CompletionHistory.key(itemID: item.id, scheduledAt: item.recurrence == nil ? nil : item.dueDate))
+                for occurrence in item.occurrenceHistory ?? [] {
+                    keys.insert(CompletionHistory.key(itemID: item.id, scheduledAt: occurrence.scheduledAt))
+                }
+            }
+        }
+        return keys
+    }
+
+    func recordCompletion(_ item: TodoItem, on controller: StickyController, isDone: Bool, completedAt: Date?) {
+        guard var history = completionHistory, !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard saveNow() else { return }
+        history.registerOwners(taskStickyOwners())
+        let key = CompletionHistory.key(itemID: item.id, scheduledAt: item.recurrence == nil ? nil : item.dueDate)
+        var celebrations: [Celebration] = []
+        if isDone, let date = completedAt {
+            celebrations = history.complete(CompletionRecord(id: UUID(), key: key,
+                text: item.text, color: controller.model.colorID.rawValue, completedAt: date))
+        } else {
+            history.reopen(key: key)
+            celebrationPresenter.dismiss()
+        }
+        do {
+            try CompletionHistoryStore.save(history)
+            completionHistory = history
+            if !celebrations.isEmpty {
+                celebrationPresenter.show(celebrations, in: controller.model.achievementNotice)
+            }
+        } catch {
+            NSLog("Completion history save failed: %@", error.localizedDescription)
+        }
     }
 
     // MARK: - Commands
@@ -107,6 +196,7 @@ final class StickyManager {
     }
 
     func remove(_ id: UUID) {
+        celebrationPresenter.dismiss()
         controllers[id]?.panel.orderOut(nil)
         controllers[id]?.panel.close()
         controllers[id] = nil
@@ -175,7 +265,10 @@ final class StickyManager {
         }
         scheduleSave()
     }
-    func hideAll() { for c in controllers.values { c.hide() } }
+    func hideAll() {
+        celebrationPresenter.dismiss()
+        for c in controllers.values { c.hide() }
+    }
 
     var openStickyCount: Int {
         controllers.values.reduce(into: 0) { count, controller in
@@ -210,6 +303,7 @@ final class StickyManager {
     /// Hides a sticky without deleting it and remembers the close order so
     /// Shift-Command-T can restore windows just like reopening a closed tab.
     func close(_ id: UUID) {
+        celebrationPresenter.dismiss()
         guard let controller = controllers[id], controller.model.isVisible else { return }
         recentlyClosedIDs.removeAll { $0 == id }
         recentlyClosedIDs.append(id)
@@ -366,6 +460,11 @@ final class StickyManager {
     /// entries are included because archiving a sticky should not erase its
     /// contribution to insights.
     func completedItemsDisplay() -> [CompletedTaskDisplay] {
+        if let history = completionHistory {
+            return history.records.map { CompletedTaskDisplay(id: $0.id, text: $0.text,
+                color: StickyColor(rawValue: $0.color) ?? .cream, completedAt: $0.completedAt) }
+                .sorted { $0.completedAt < $1.completedAt }
+        }
         var result: [CompletedTaskDisplay] = []
         for id in order {
             guard let model = controllers[id]?.model else { continue }
@@ -406,6 +505,18 @@ final class StickyManager {
     // MARK: - Persistence (debounced)
 
     func scheduleSave() {
+        if var history = completionHistory {
+            let previous = history.createdTaskKeys
+            let previousOwners = history.taskStickyIDs
+            history.registerCreated(createdTaskKeys())
+            history.registerOwners(taskStickyOwners())
+            if history.createdTaskKeys != previous || history.taskStickyIDs != previousOwners {
+                do {
+                    try CompletionHistoryStore.save(history)
+                    completionHistory = history
+                } catch { NSLog("Task creation history save failed: %@", error.localizedDescription) }
+            }
+        }
         saveTimer?.invalidate()
         let t = Timer(timeInterval: 0.4, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.saveNow() }

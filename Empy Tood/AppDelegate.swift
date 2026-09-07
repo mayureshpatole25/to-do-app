@@ -10,10 +10,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private var homeWindow: HostedWindowController<HomeView>?
     private var settingsWindow: HostedWindowController<SettingsView>?
+    private var achievementsWindow: HostedWindowController<AchievementsView>?
     private var onboardingWindow: HostedWindowController<OnboardingView>?
     private var introWindow: HostedWindowController<IntroFallView>?
     private var quickCaptureController: QuickCaptureController?
     private var applicationShortcutMonitor: Any?
+
+    func showAchievements() {
+        if achievementsWindow == nil {
+            let sticky = manager.mostRecentlyActiveID.flatMap { manager.controllers[$0]?.model }
+            let size = sticky?.frame.size ?? NSSize(width: 378, height: 490)
+            achievementsWindow = HostedWindowController(
+                title: "Achievements", size: NSSize(width: max(420, min(size.width, 560)), height: 430),
+                minimumSize: NSSize(width: 420, height: 430),
+                resizable: true, content: AchievementsView(manager: manager))
+        }
+        achievementsWindow?.present()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Regular app: Dock icon visible, matches LSUIElement=false in
@@ -35,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         registerBundledFonts()
         manager = StickyManager()
         manager.onOpenHome = { [weak self] in self?.showHome() }
+        manager.onOpenAchievements = { [weak self] in self?.showAchievements() }
         statusMenu = StatusMenuController(manager: manager, appDelegate: self)
         manager.restoreAll()
 

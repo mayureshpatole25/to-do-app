@@ -1,0 +1,66 @@
+import Foundation
+
+@main
+struct CompletionHistoryRegression {
+    static func main() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Australia/Sydney")!
+        let parse = ISO8601DateFormatter()
+        func date(_ day: String) -> Date { parse.date(from: day + "T02:00:00Z")! }
+        func record(_ day: String, key: String = UUID().uuidString) -> CompletionRecord {
+            CompletionRecord(id: UUID(), key: key, text: "Task", color: "cream", completedAt: date(day))
+        }
+        var history = CompletionHistory()
+        history.seed((0..<49).map { _ in record("2026-09-03") })
+        let entry = record("2026-09-04")
+        assert(history.complete(entry, now: date("2026-09-04"), calendar: cal) == [.milestone(50), .streak(2)])
+        assert(history.complete(entry, now: date("2026-09-04"), calendar: cal).isEmpty)
+        history.reopen(key: entry.key)
+        assert(history.records.count == 49)
+        assert(history.complete(entry, now: date("2026-09-04"), calendar: cal).isEmpty)
+        assert(history.streak(at: date("2026-09-06"), calendar: cal) == 2)
+        assert(history.complete(record("2026-09-07"), now: date("2026-09-07"), calendar: cal) == [.streak(3)])
+        assert(history.streak(at: date("2026-09-09"), calendar: cal) == 0)
+        assert(history.complete(record("2026-09-09"), now: date("2026-09-09"), calendar: cal) == [.streak(1)])
+        let encoded = try JSONEncoder().encode(history)
+        var restored = try JSONDecoder().decode(CompletionHistory.self, from: encoded)
+        assert(restored.complete(record("2026-09-09"), now: date("2026-09-09"), calendar: cal).isEmpty)
+        let id = UUID()
+        assert(CompletionHistory.key(itemID: id, scheduledAt: date("2026-09-07")) != CompletionHistory.key(itemID: id, scheduledAt: date("2026-09-08")))
+        var longRun = CompletionHistory()
+        longRun.seed(["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24"].map { record($0) })
+        assert(longRun.streak(at: date("2026-08-24"), calendar: cal) == 6)
+        assert(longRun.streak(at: date("2026-08-25"), calendar: cal) == 6)
+        assert(longRun.streak(at: date("2026-08-26"), calendar: cal) == 0)
+        assert(longRun.longestStreak(calendar: cal) == 6)
+        assert(longRun.doneRate == 100)
+        longRun.registerCreated(["unfinished"])
+        assert(longRun.totalCreated == 7)
+        assert(longRun.doneRate == 86)
+        longRun.reopen(key: longRun.records[0].key)
+        assert(longRun.totalCreated == 7)
+        assert(longRun.doneRate == 71)
+        let oldJSON = "{\"records\":[],\"highestCelebratedMilestone\":0,\"celebratedDays\":[]}"
+        let oldHistory = try JSONDecoder().decode(CompletionHistory.self, from: Data(oldJSON.utf8))
+        assert(oldHistory.totalCreated == 0 && oldHistory.doneRate == 0)
+        let stickyA = UUID(), stickyB = UUID(), taskA = UUID(), taskB = UUID(), pending = UUID()
+        var scoped = CompletionHistory()
+        var a = record("2026-09-03")
+        a.key = CompletionHistory.key(itemID: taskA, scheduledAt: date("2026-09-03"))
+        var b = record("2026-09-04")
+        b.key = CompletionHistory.key(itemID: taskB, scheduledAt: nil)
+        scoped.seed([a, b])
+        scoped.registerCreated([pending.uuidString])
+        scoped.registerOwners([taskA.uuidString: stickyA, pending.uuidString: stickyA, taskB.uuidString: stickyB])
+        let filtered = scoped.filtered(to: [stickyA])
+        assert(filtered.records.count == 1 && filtered.doneRate == 50)
+        assert(filtered.longestStreak(calendar: cal) == 1)
+        assert(scoped.filtered(to: [stickyA, stickyB]).records.count == 2)
+        assert(scoped.filtered(to: []).totalCreated == scoped.totalCreated)
+        assert(scoped.filtered(to: [UUID()]).records.isEmpty)
+        let savedScope = try JSONDecoder().decode(CompletionHistory.self, from: JSONEncoder().encode(scoped))
+        assert(savedScope.filtered(to: [stickyA]).doneRate == 50)
+        assert(oldHistory.filtered(to: [stickyA]).records.isEmpty)
+        print("PASS: milestones, simultaneous streak, undo/recheck, relaunch, weekend pause, missed weekdays, recurring identities")
+    }
+}

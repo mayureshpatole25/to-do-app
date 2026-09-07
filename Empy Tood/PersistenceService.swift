@@ -1,14 +1,11 @@
 import Foundation
 
-/// Reads/writes the sticky collection as JSON inside the sandboxed app
-/// container's Application Support directory. No extra entitlement required.
+/// Reads/writes the sticky collection in the canonical Application Support store.
 struct PersistenceService {
     private let fileName = "stickies.json"
 
     private var directory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory,
-                                            in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent(AppIdentity.storageDirectory, isDirectory: true)
+        let dir = AppIdentity.dataDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
