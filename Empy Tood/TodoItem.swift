@@ -21,6 +21,9 @@ struct TodoItem: Identifiable, Codable, Equatable {
     /// included a time. New date-only tokens persist `false` explicitly.
     var dueDateHasTime: Bool?
 
+    var recurrence: TaskRecurrence?
+    var occurrenceHistory: [TaskOccurrence]?
+
     init(
         id: UUID = UUID(),
         text: String = "",
@@ -52,7 +55,7 @@ struct TodoItem: Identifiable, Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, text, isDone, completedAt, indentLevel, dueDate, dueDateText, dueDateOffset, dueDateHasTime
+        case id, text, isDone, completedAt, indentLevel, dueDate, dueDateText, dueDateOffset, dueDateHasTime, recurrence, occurrenceHistory
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +67,8 @@ struct TodoItem: Identifiable, Codable, Equatable {
         indentLevel = Self.clampedIndentLevel(
             try container.decodeIfPresent(Int.self, forKey: .indentLevel) ?? 0
         )
+        recurrence = try container.decodeIfPresent(TaskRecurrence.self, forKey: .recurrence)
+        occurrenceHistory = try container.decodeIfPresent([TaskOccurrence].self, forKey: .occurrenceHistory)
         dueDate = try container.decodeIfPresent(Date.self, forKey: .dueDate)
         dueDateText = try container.decodeIfPresent(String.self, forKey: .dueDateText)
         dueDateOffset = try container.decodeIfPresent(Int.self, forKey: .dueDateOffset)

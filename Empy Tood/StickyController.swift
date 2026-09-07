@@ -660,7 +660,9 @@ final class StickyController: NSObject, NSWindowDelegate {
         dueDate: Date?,
         tokenText: String?,
         offset: Int?,
-        hasTime: Bool?
+        hasTime: Bool?,
+        recurrence: TaskRecurrence? = nil,
+        replaceRecurrence: Bool = false
     ) {
         guard let item = model.items.first(where: { $0.id == id }) else { return }
         let prior = item
@@ -671,7 +673,9 @@ final class StickyController: NSObject, NSWindowDelegate {
                 dueDate: prior.dueDate,
                 tokenText: prior.dueDateText,
                 offset: prior.dueDateOffset,
-                hasTime: prior.dueDateHasTime
+                hasTime: prior.dueDateHasTime,
+                recurrence: prior.recurrence,
+                replaceRecurrence: true
             )
         }
         completionUndoManager.setActionName(dueDate == nil ? "Clear Task Date" : "Assign Task Date")
@@ -681,7 +685,9 @@ final class StickyController: NSObject, NSWindowDelegate {
             dueDate: dueDate,
             tokenText: tokenText,
             offset: offset,
-            hasTime: hasTime
+            hasTime: hasTime,
+            recurrence: recurrence,
+            replaceRecurrence: replaceRecurrence
         )
     }
 
@@ -704,6 +710,9 @@ final class StickyController: NSObject, NSWindowDelegate {
         let priorCompletedAt = item.completedAt
 
         completionUndoManager.registerUndo(withTarget: self) { controller in
+            // An old completion undo must never complete a later occurrence.
+            if item.recurrence != nil,
+               controller.model.items.first(where: { $0.id == id })?.dueDate != item.dueDate { return }
             controller.setDone(id, isDone: priorIsDone, completedAt: priorCompletedAt)
         }
         completionUndoManager.setActionName(isDone ? "Complete Task" : "Reopen Task")

@@ -182,13 +182,17 @@ struct TaskDateDraft: Equatable {
     var displayedMonth: Date
     var commandRange: NSRange?
     var includesTime: Bool
+    var recurrence: TaskRecurrence? = nil
+    var showsRepeat = false
+    var customRepeat = false
 
     init(
         itemID: UUID,
         query: String,
         selectedDate: Date,
         commandRange: NSRange? = nil,
-        includesTime: Bool = false
+        includesTime: Bool = false,
+        recurrence: TaskRecurrence? = nil
     ) {
         self.itemID = itemID
         self.query = query
@@ -196,6 +200,8 @@ struct TaskDateDraft: Equatable {
         self.displayedMonth = Calendar.current.dateInterval(of: .month, for: selectedDate)?.start ?? selectedDate
         self.commandRange = commandRange
         self.includesTime = includesTime
+        self.recurrence = recurrence ?? (query.hasPrefix("rep") ? TaskRecurrence(anchor: selectedDate) : nil)
+        self.showsRepeat = query.hasPrefix("rep") || recurrence != nil
     }
 }
 
@@ -262,14 +268,17 @@ struct TaskDateAssignmentPopover: View {
         VStack(spacing: 0) {
             dateAndTimeHeader
 
-            if !suggestions.isEmpty {
+            if !draft.showsRepeat && !suggestions.isEmpty {
                 suggestionsList
                 Divider().overlay(TaskDatePickerStyle.border)
             }
 
-            calendarHeader
-            weekdayHeader
-            calendarGrid
+            repeatSettings
+            if !draft.showsRepeat {
+                calendarHeader
+                weekdayHeader
+                calendarGrid
+            }
 
             Divider().overlay(TaskDatePickerStyle.border)
                 .padding(.top, 8)
@@ -284,18 +293,167 @@ struct TaskDateAssignmentPopover: View {
             timeText = TaskDatePresentation.timeString(from: draft.selectedDate)
             timeEditing = false
             timeFocused = false
-            onTimeEditingChange(false)
+            draft.customRepeat = draft.recurrence.map { rule in
+                !repeatPresets.contains { $0.1.unit == rule.unit && $0.1.interval == rule.interval && $0.1.weekdays == rule.weekdays && rule.monthDays.isEmpty && rule.endDate == nil && rule.occurrenceLimit == nil }
+            } ?? false
+            if let rule = draft.recurrence,
+               let index = repeatPresets.firstIndex(where: { $0.1.unit == rule.unit && $0.1.interval == rule.interval && $0.1.weekdays == rule.weekdays }) {
+                onHighlight(index)
+            }
+            onTimeEditingChange(draft.customRepeat)
+        }
+        .onChange(of: draft.query) { _, query in
+            if query.hasPrefix("rep") {
+                draft.showsRepeat = true
+                if draft.recurrence == nil { draft.recurrence = TaskRecurrence(anchor: draft.selectedDate) }
+            }
         }
         .onChange(of: draft.selectedDate) { _, date in
             guard !timeFocused else { return }
             timeText = TaskDatePresentation.timeString(from: date)
         }
+        .onChange(of: draft.customRepeat) { _, editing in
+            onTimeEditingChange(editing || timeEditing)
+        }
         .onChange(of: timeEditing) { _, editing in
-            onTimeEditingChange(editing)
+            onTimeEditingChange(editing || draft.customRepeat)
         }
         .onDisappear {
             onTimeEditingChange(false)
         }
+    }
+
+    private var repeatSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                draft.showsRepeat.toggle()
+            } label: {
+                HStack {
+                    Text("Repeat")
+                    Spacer()
+                    Text(draft.recurrence?.label.replacingOccurrences(of: "@repeats ", with: "") ?? "Never")
+                        .foregroundStyle(TaskDatePickerStyle.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                    Image(systemName: draft.showsRepeat ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if draft.showsRepeat {
+                if !draft.customRepeat {
+                ForEach(Array(repeatPresets.enumerated()), id: \.offset) { index, preset in
+                    Button {
+                        onHighlight(index)
+                        draft.recurrence = preset.1
+                        draft.customRepeat = false
+                    } label: {
+                        HStack {
+                            Text(preset.0)
+                            Spacer()
+                            if !draft.customRepeat && draft.recurrence?.unit == preset.1.unit && draft.recurrence?.interval == preset.1.interval && draft.recurrence?.weekdays == preset.1.weekdays {
+                                Image(systemName: "checkmark").foregroundStyle(TaskDatePickerStyle.accent)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                        .background(index == highlightedSuggestion ? TaskDatePickerStyle.highlight : .clear)
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+                }
+                Button(draft.customRepeat ? "Presets" : "Custom…") {
+                    if draft.recurrence == nil { draft.recurrence = TaskRecurrence(anchor: draft.selectedDate) }
+                    draft.customRepeat.toggle()
+                }.buttonStyle(.plain)
+                if draft.customRepeat, draft.recurrence != nil { customRepeatSettings }
+                if draft.recurrence != nil {
+                    Button("Does not repeat") { draft.recurrence = nil; draft.customRepeat = false }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(TaskDatePickerStyle.secondary)
+                }
+            }
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(TaskDatePickerStyle.primary)
+        .padding(.vertical, 12)
+    }
+
+    private var repeatPresets: [(String, TaskRecurrence)] {
+        TaskRecurrence.presets(for: draft.selectedDate)
+    }
+
+    private var recurrenceBinding: Binding<TaskRecurrence> {
+        Binding(get: { draft.recurrence ?? TaskRecurrence(anchor: draft.selectedDate) }, set: { draft.recurrence = $0 })
+    }
+
+    private var customRepeatSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Every")
+                Stepper(value: recurrenceBinding.interval, in: 1...99) {
+                    Text("\(draft.recurrence?.interval ?? 1)").monospacedDigit()
+                }.frame(width: 95)
+                Picker("Unit", selection: recurrenceBinding.unit) {
+                    ForEach(TaskRecurrence.Unit.allCases, id: \.self) { unit in
+                        Text(unit.rawValue + "s").tag(unit)
+                    }
+                }.labelsHidden()
+            }
+            if draft.recurrence?.unit == .week {
+                HStack(spacing: 5) {
+                    ForEach([2,3,4,5,6,7,1], id: \.self) { day in
+                        Button {
+                            var days = draft.recurrence?.weekdays ?? []
+                            if days.contains(day) { days.removeAll { $0 == day } } else { days.append(day) }
+                            draft.recurrence?.weekdays = days
+                        } label: {
+                            Text(calendar.shortWeekdaySymbols[day - 1])
+                                .font(.system(size: 11, weight: .medium))
+                                .frame(maxWidth: .infinity).frame(height: 30)
+                                .background((draft.recurrence?.weekdays.contains(day) == true) ? TaskDatePickerStyle.highlight : TaskDatePickerStyle.raised)
+                                .clipShape(Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+            if draft.recurrence?.unit == .month {
+                LazyVGrid(columns: columns, spacing: 4) {
+                    ForEach(1...31, id: \.self) { day in
+                        Button {
+                            var days = draft.recurrence?.monthDays ?? []
+                            if days.contains(day) { days.removeAll { $0 == day } } else { days.append(day) }
+                            draft.recurrence?.monthDays = days
+                        } label: {
+                            Text("\(day)").frame(width: 30, height: 25)
+                                .background(draft.recurrence?.monthDays.contains(day) == true ? TaskDatePickerStyle.highlight : .clear)
+                                .clipShape(Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+            DatePicker("Starts", selection: $draft.selectedDate, displayedComponents: .date)
+            Picker("Ends", selection: Binding(get: {
+                draft.recurrence?.endDate != nil ? 1 : (draft.recurrence?.occurrenceLimit != nil ? 2 : 0)
+            }, set: { value in
+                draft.recurrence?.endDate = value == 1 ? draft.selectedDate : nil
+                draft.recurrence?.occurrenceLimit = value == 2 ? 10 : nil
+            })) {
+                Text("Never").tag(0)
+                Text("On date").tag(1)
+                Text("After").tag(2)
+            }
+            if draft.recurrence?.endDate != nil {
+                DatePicker("End date", selection: Binding(get: { draft.recurrence?.endDate ?? draft.selectedDate }, set: { draft.recurrence?.endDate = $0 }), in: draft.selectedDate..., displayedComponents: .date)
+            }
+            if draft.recurrence?.occurrenceLimit != nil {
+                Stepper(value: Binding(get: { draft.recurrence?.occurrenceLimit ?? 10 }, set: { draft.recurrence?.occurrenceLimit = $0 }), in: 1...999) {
+                    Text("\(draft.recurrence?.occurrenceLimit ?? 10) occurrences")
+                }
+            }
+        }
+        .padding(10)
+        .background(TaskDatePickerStyle.raised)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var dateAndTimeHeader: some View {
