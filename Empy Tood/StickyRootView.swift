@@ -892,11 +892,17 @@ struct StickyRootView: View {
             // which ate into the title's width and made longer titles wrap
             // mid-word or get cut off. Up here it costs a line of height
             // instead, and the title gets the sticky's full width.
+            if let celebration = model.achievementNotice.celebration {
+                AchievementNotice(celebration: celebration,
+                    close: { controller.dismissAchievementNotice() },
+                    open: { controller.openAchievements() })
+            } else {
             HStack(alignment: .center, spacing: 12) {
                 Text(Self.dateFormatter.string(from: model.day))
                     .font(bodyFont(14))
                     .foregroundStyle(color.ink.opacity(0.3))
                 Spacer(minLength: 8)
+            }
             }
 
             // Gives the title an explicit maximum width budget — an

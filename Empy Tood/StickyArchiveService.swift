@@ -15,9 +15,7 @@ struct StickyArchiveService {
     private let fileName = "archived_stickies.json"
 
     private var directory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory,
-                                            in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent(AppIdentity.storageDirectory, isDirectory: true)
+        let dir = AppIdentity.dataDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

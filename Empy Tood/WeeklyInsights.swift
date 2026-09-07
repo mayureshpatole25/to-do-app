@@ -88,15 +88,7 @@ enum WeeklyInsights {
         let yesterday = cal.date(byAdding: .day, value: -1, to: today) ?? today
         let yesterdayCount = countsByDay[yesterday, default: 0]
 
-        var streak = 0
-        var cursor = today
-        if countsByDay[cursor, default: 0] == 0 {
-            cursor = cal.date(byAdding: .day, value: -1, to: cursor) ?? cursor
-        }
-        while countsByDay[cursor, default: 0] > 0 {
-            streak += 1
-            cursor = cal.date(byAdding: .day, value: -1, to: cursor) ?? cursor
-        }
+        let streak = manager.completionHistory?.streak(at: now, calendar: cal) ?? 0
 
         let weekJournalEntries = journal.entries
             .filter { !$0.text.isEmpty && weekInterval.contains($0.day) }

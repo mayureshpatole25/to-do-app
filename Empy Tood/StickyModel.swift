@@ -29,6 +29,7 @@ struct StickyData: Codable, Identifiable {
 @Observable
 final class StickyModel: Identifiable {
     let id: UUID
+    let achievementNotice = StickyAchievementNotice()
     var title: String
     var day: Date
     var items: [TodoItem]

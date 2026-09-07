@@ -1,7 +1,16 @@
 import Foundation
+import Darwin
 
 /// The single canonical identity for this app and its local data.
 enum AppIdentity {
+    /// Resolve the login user's home independently of sandbox-relative NSHomeDirectory.
+    /// All installed and development builds use this single store.
+    static var dataDirectory: URL {
+        let home = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
+        return URL(fileURLWithPath: home, isDirectory: true)
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+            .appendingPathComponent(storageDirectory, isDirectory: true)
+    }
     static let displayName = "Empy Tood"
     static var storageDirectory: String {
         #if DEBUG

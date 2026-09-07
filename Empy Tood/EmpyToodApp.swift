@@ -11,5 +11,10 @@ struct EmpyToodApp: App {
         Settings {
             EmptyView()
         }
+        .commands {
+            CommandGroup(after: .toolbar) {
+                Button("Achievements") { appDelegate.showAchievements() }
+            }
+        }
     }
 }
