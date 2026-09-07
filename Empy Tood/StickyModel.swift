@@ -218,7 +218,9 @@ final class StickyModel: Identifiable {
         dueDate: Date?,
         tokenText: String?,
         offset: Int?,
-        hasTime: Bool?
+        hasTime: Bool?,
+        recurrence: TaskRecurrence? = nil,
+        replaceRecurrence: Bool = false
     ) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].text = text
@@ -226,6 +228,14 @@ final class StickyModel: Identifiable {
         items[idx].dueDateText = tokenText
         items[idx].dueDateOffset = offset
         items[idx].dueDateHasTime = hasTime
+        if replaceRecurrence || dueDate == nil { items[idx].recurrence = recurrence }
+        if items[idx].recurrence != nil && items[idx].dueDateRange == nil {
+            items[idx].recurrence = nil
+            items[idx].dueDate = nil
+            items[idx].dueDateText = nil
+            items[idx].dueDateOffset = nil
+            items[idx].dueDateHasTime = nil
+        }
         onChange?()
     }
 

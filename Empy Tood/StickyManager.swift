@@ -24,6 +24,7 @@ final class StickyManager {
     let stickyArchive = StickyArchiveService()
     @ObservationIgnored private var rollover: RolloverScheduler?
 
+    @ObservationIgnored private var recurrenceTimer: Timer?
     @ObservationIgnored private var saveTimer: Timer?
     @ObservationIgnored private let lastActiveDefaultsKey = "today.lastActiveStickyID"
     @ObservationIgnored private var recentlyClosedIDs: [UUID] = []
@@ -66,6 +67,10 @@ final class StickyManager {
                 let model = StickyModel(data: data)
                 addController(for: model)
             }
+        }
+        advanceRecurringTasks()
+        recurrenceTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.advanceRecurringTasks() }
         }
         rollover?.start()
     }
@@ -421,6 +426,18 @@ final class StickyManager {
 
     /// Advance the sticky day without removing its completed items. Their
     /// completion timestamps are the source of truth for visibility and stats.
+    private func advanceRecurringTasks() {
+        let now = Date()
+        var changed = false
+        for controller in controllers.values {
+            let model = controller.model
+            for index in model.items.indices {
+                if model.items[index].advanceRecurrence(now: now) { changed = true }
+            }
+        }
+        if changed { saveNow() }
+    }
+
     private func performRollover() {
         let now = Date()
         for id in order {

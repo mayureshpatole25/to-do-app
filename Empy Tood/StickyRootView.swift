@@ -1909,6 +1909,10 @@ struct StickyRootView: View {
             return
         }
 
+        if let item = model.items.first(where: { $0.id == itemID }),
+           let range = item.dueDateRange,
+           NSRange(command.range, in: text).location == range.location { return }
+
         if let parsedDate = TaskDateExpression.date(from: command.query) {
             DispatchQueue.main.async {
                 guard let currentText = model.items.first(where: { $0.id == itemID })?.text,
@@ -1933,7 +1937,10 @@ struct StickyRootView: View {
                     query: command.query,
                     selectedDate: selected,
                     commandRange: commandRange,
-                    includesTime: false
+                    includesTime: model.items.first(where: { $0.id == itemID })?.dueDate.map {
+                        $0 != Calendar.current.startOfDay(for: $0)
+                    } ?? false,
+                    recurrence: model.items.first(where: { $0.id == itemID })?.recurrence
                 )
             )
             // Opening a suggestion surface is observational: it must not move
@@ -1947,12 +1954,14 @@ struct StickyRootView: View {
 
     private func openDatePicker(for itemID: UUID, selectedDate: Date) {
         highlightedDateSuggestion = 0
-        let includesTime = model.items.first(where: { $0.id == itemID })?.dateTokenHasTime ?? false
+        let currentItem = model.items.first(where: { $0.id == itemID })
+        let includesTime = currentItem?.recurrence != nil ? selectedDate != Calendar.current.startOfDay(for: selectedDate) : (currentItem?.dateTokenHasTime ?? false)
         presentDatePicker(TaskDateDraft(
             itemID: itemID,
             query: "",
             selectedDate: selectedDate,
-            includesTime: includesTime
+            includesTime: includesTime,
+            recurrence: model.items.first(where: { $0.id == itemID })?.recurrence
         ))
     }
 
@@ -1993,7 +2002,28 @@ struct StickyRootView: View {
 
     private func handleDatePickerKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard let draft = dateDraft, modifiers.isEmpty else { return false }
-        let suggestions = TaskDateSuggestion.matching(draft.query)
+        if draft.showsRepeat && !draft.customRepeat {
+            let presets = TaskRecurrence.presets(for: draft.selectedDate)
+            switch keyCode {
+            case 125:
+                highlightedDateSuggestion = min(highlightedDateSuggestion + 1, presets.count)
+                return true
+            case 126:
+                highlightedDateSuggestion = max(highlightedDateSuggestion - 1, 0)
+                return true
+            case 36, 76, 48:
+                if highlightedDateSuggestion == presets.count {
+                    dateDraft?.recurrence = draft.recurrence ?? TaskRecurrence(anchor: draft.selectedDate)
+                    dateDraft?.customRepeat = true
+                } else {
+                    dateDraft?.recurrence = presets[highlightedDateSuggestion].1
+                    commitDate(draft.selectedDate, includesTime: draft.includesTime, for: draft.itemID)
+                }
+                return true
+            default: break
+            }
+        }
+        let suggestions = draft.showsRepeat ? [] : TaskDateSuggestion.matching(draft.query)
 
         switch keyCode {
         case 53: // Escape
@@ -2148,9 +2178,23 @@ struct StickyRootView: View {
 
     private func commitDate(_ date: Date, includesTime: Bool, for itemID: UUID) {
         guard let item = model.items.first(where: { $0.id == itemID }) else { return }
-        let tokenText = TaskDatePresentation.string(from: date, includesTime: includesTime)
-        let sourceRange = dateDraft?.commandRange ?? item.dueDateRange
+        var recurrence = dateDraft?.recurrence
+        var assignedDate = includesTime ? date : Calendar.current.startOfDay(for: date)
+        if item.recurrence == nil || item.dueDate != assignedDate { recurrence?.anchor = assignedDate }
+        if let recurrence, let previousDay = Calendar.current.date(byAdding: .day, value: -1, to: assignedDate),
+           let first = recurrence.next(after: previousDay) { assignedDate = first }
+        let tokenText = recurrence?.label ?? TaskDatePresentation.string(from: date, includesTime: includesTime)
+        var sourceRange = dateDraft?.commandRange ?? item.dueDateRange
         let mutable = NSMutableString(string: item.text)
+        // A new @repeat command replaces an existing date/repeat assignment,
+        // leaving exactly one inline scheduling label on the task.
+        if let commandRange = dateDraft?.commandRange, let existing = item.dueDateRange,
+           NSIntersectionRange(commandRange, existing).length == 0 {
+            mutable.deleteCharacters(in: existing)
+            if existing.location < commandRange.location {
+                sourceRange = NSRange(location: commandRange.location - existing.length, length: commandRange.length)
+            }
+        }
         let replacementRange: NSRange
         if let sourceRange, NSMaxRange(sourceRange) <= mutable.length {
             replacementRange = sourceRange
@@ -2163,10 +2207,12 @@ struct StickyRootView: View {
         controller.setDateToken(
             itemID,
             text: mutable as String,
-            dueDate: date,
+            dueDate: assignedDate,
             tokenText: tokenText,
             offset: replacementRange.location,
-            hasTime: includesTime
+            hasTime: recurrence == nil && includesTime,
+            recurrence: recurrence,
+            replaceRecurrence: true
         )
         model.isDateTimeFieldEditing = false
         dateDraft = nil
