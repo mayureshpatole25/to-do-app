@@ -41,10 +41,18 @@ final class StickyController: NSObject, NSWindowDelegate {
     private var pendingCaretTarget: PendingCaretTarget?
     private var pendingCaretGeneration: UUID?
     private var hosting: NSHostingView<StickyRootView>!
+    var closeOverride: (() -> Void)?
+    var archiveOverride: (() -> Void)?
+    var completionReportingController: ((UUID) -> StickyController?)?
     private var frameBeforeExpansion: NSRect?
     private var isRepairingFrame = false
 
-    init(model: StickyModel, manager: StickyManager) {
+    init(
+        model: StickyModel,
+        manager: StickyManager,
+        checklistSections: [StickyChecklistSection]? = nil,
+        taskPicker: StickyTaskPickerConfiguration? = nil
+    ) {
         let persistedFrame = StickyWindowGeometry.persistedFrame(model.frame)
         // Both dimensions are now user-controlled, so an individually valid
         // width and height can still combine into an unsafe initial backing
@@ -69,7 +77,12 @@ final class StickyController: NSObject, NSWindowDelegate {
         self.panel = StickyPanel(frameRect: model.frame)
         super.init()
 
-        let root = StickyRootView(model: model, controller: self)
+        let root = StickyRootView(
+            model: model,
+            controller: self,
+            checklistSections: checklistSections,
+            taskPicker: taskPicker
+        )
         hosting = NSHostingView(rootView: root)
         // The window owns both resizable dimensions. SwiftUI responds to the
         // available content size but never writes constraints back to AppKit.
@@ -717,7 +730,8 @@ final class StickyController: NSObject, NSWindowDelegate {
         }
         completionUndoManager.setActionName(isDone ? "Complete Task" : "Reopen Task")
         model.setDone(id, isDone: isDone, completedAt: completedAt)
-        manager?.recordCompletion(item, on: self, isDone: isDone, completedAt: completedAt)
+        let reportingController = completionReportingController?(id) ?? self
+        manager?.recordCompletion(item, on: reportingController, isDone: isDone, completedAt: completedAt)
     }
 
     /// Genie-effect minimizes to the Dock, same as any other window —
@@ -726,13 +740,19 @@ final class StickyController: NSObject, NSWindowDelegate {
 
     /// Close only hides this window. The sticky and all of its contents stay
     /// in the manager and on disk, so it can be opened again from Home.
-    func closeSticky() { manager?.close(model.id) }
+    func closeSticky() {
+        if let closeOverride { closeOverride() }
+        else { manager?.close(model.id) }
+    }
     func openAchievements() { manager?.openAchievements() }
     func dismissAchievementNotice() { manager?.dismissAchievementNotice() }
 
     /// The dedicated archive button is an explicit action, so it skips the
     /// close-behavior chooser and archives this sticky directly.
-    func archiveSticky() { manager?.archive(model.id) }
+    func archiveSticky() {
+        if let archiveOverride { archiveOverride() }
+        else { manager?.archive(model.id) }
+    }
 
     /// Every explicit archive/delete action (the archive button, ⌘D,
     /// Command-Delete, and the context menu) routes through here rather than

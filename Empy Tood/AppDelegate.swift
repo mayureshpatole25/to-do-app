@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var statusMenu: StatusMenuController!
 
     private var homeWindow: HostedWindowController<HomeView>?
+    private var dailyDigestWindow: DailyDigestWindowController?
     private var settingsWindow: HostedWindowController<SettingsView>?
     private var achievementsWindow: HostedWindowController<AchievementsView>?
     private var onboardingWindow: HostedWindowController<OnboardingView>?
@@ -106,22 +107,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             manager.hideAll()
             showIntro()
         } else {
-            // Normal launches go straight back to the one sticky that was
-            // open and active. Home is intentionally available only from
-            // the menu-bar command.
-            manager.focusLastOpenSticky()
+            // Home is the app's default landing window. Individual stickies
+            // keep their persisted visibility, but launching the app always
+            // gives the user an obvious place to start.
+            showHome()
         }
     }
 
-    // Re-launching the app while it's already running (e.g. opening it
-    // again from Finder/Spotlight) returns to the already-open sticky. It
-    // must not open Home or resurrect a sticky the user closed.
+    // Clicking the Dock icon or opening the app again returns to Home.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         // Guard against the Dock icon (now always visible) being clicked
         // mid-onboarding — that shouldn't reveal every sticky and Home
         // before onboarding's own "Sticky" step gets to do that itself.
         guard AppSettings.shared.onboardingCompleted else { return true }
-        manager.focusLastOpenSticky()
+        showHome()
         return true
     }
 
@@ -150,10 +149,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 size: NSSize(width: 900, height: 640),
                 minimumSize: HomeView.minimumSize,
                 hidesTitleBar: true,
-                content: HomeView(manager: manager)
+                content: HomeView(manager: manager, onShowDailyDigest: { [weak self] in
+                    self?.showDailyDigest()
+                })
             )
         }
         homeWindow?.present()
+    }
+
+    func showDailyDigest() {
+        if dailyDigestWindow == nil {
+            dailyDigestWindow = DailyDigestWindowController(manager: manager)
+        }
+        dailyDigestWindow?.present()
     }
 
     func showSettings() {
@@ -201,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             content: OnboardingView(manager: manager, settings: AppSettings.shared, onFinish: { [weak self] in
                 self?.onboardingWindow?.close()
                 self?.onboardingWindow = nil
-                self?.manager.focusLastOpenSticky()
+                self?.showHome()
             }, onExitToIntro: { [weak self] in
                 self?.onboardingWindow?.close()
                 self?.onboardingWindow = nil
