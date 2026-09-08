@@ -126,6 +126,10 @@ final class StickyController: NSObject, NSWindowDelegate {
             guard let self, event.window === self.panel else { return event }
 
             let commandModifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            if self.model.isTaskPickerPresented,
+               self.model.onHandleTaskPickerKey?(event.keyCode, commandModifiers) == true {
+                return nil
+            }
             let pressedKey = event.charactersIgnoringModifiers?.lowercased()
             if pressedKey == "z", commandModifiers == .command,
                self.completionUndoManager.canUndo {

@@ -678,6 +678,12 @@ struct StickyTaskPickerItem: Identifiable {
 struct StickyTaskPickerConfiguration {
     let candidates: () -> [StickyTaskPickerItem]
     let didAdd: (StickyTaskPickerItem) -> Void
+    let didRemove: (StickyTaskPickerItem) -> Void
+}
+
+private enum StickyTaskPickerMode: Equatable {
+    case add
+    case remove
 }
 
 /// The visible sticky: flat, edge-to-edge paper with a big two-line "To Do"
@@ -691,6 +697,7 @@ struct StickyRootView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @FocusState private var focusedID: UUID?
     @FocusState private var titleFocused: Bool
+    @FocusState private var taskPickerSearchFocused: Bool
     @State private var hovering = false
     @State private var hoveringTopChrome = false
     @State private var showColors = false
@@ -711,9 +718,14 @@ struct StickyRootView: View {
     @State private var priorityPopoverItemID: UUID?
     @State private var collapsedSectionIDs: Set<UUID> = []
     @State private var addRowHovered = false
+    @State private var removeRowHovered = false
     @State private var showingTaskPicker = false
+    @State private var taskPickerMode: StickyTaskPickerMode = .add
     @State private var taskPickerQuery = ""
     @State private var highlightedTaskPickerID: UUID?
+    @State private var taskPickerScrollTargetID: UUID?
+    @State private var taskPickerScrollAnchor: UnitPoint = .bottom
+    @State private var taskPickerFirstVisibleIndex = 0
     @State private var suppressCheckboxToggleID: UUID?
     @State private var dateDraft: TaskDateDraft?
     @State private var highlightedDateSuggestion = 0
@@ -763,7 +775,13 @@ struct StickyRootView: View {
             content
             bottomToolbar
             windowControls
-            if showingTaskPicker { taskPickerOverlay }
+            if showingTaskPicker {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { showingTaskPicker = false }
+                    .zIndex(19)
+                taskPickerOverlay
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         // A `.background` GeometryReader reads the window's current width
@@ -842,6 +860,9 @@ struct StickyRootView: View {
             model.onHandleDatePickerKey = { keyCode, modifiers in
                 handleDatePickerKey(keyCode, modifiers: modifiers)
             }
+            model.onHandleTaskPickerKey = { keyCode, modifiers in
+                handleTaskPickerKey(keyCode, modifiers: modifiers)
+            }
             model.onHandleDateTokenKey = { keyCode, modifiers, selection in
                 handleDateTokenKey(keyCode, modifiers: modifiers, selection: selection)
             }
@@ -864,6 +885,8 @@ struct StickyRootView: View {
             model.onWillSetDone = nil
             model.onToggleDoneVisibility = nil
             model.onHandleDatePickerKey = nil
+            model.onHandleTaskPickerKey = nil
+            model.isTaskPickerPresented = false
             model.onHandleDateTokenKey = nil
             model.onNormalizeDateTokenSelection = nil
             cancelCompletionExitTasks()
@@ -874,6 +897,14 @@ struct StickyRootView: View {
         .onChange(of: completionAnimationsEnabled) { _, isEnabled in
             if !isEnabled {
                 cancelCompletionExitTasks()
+            }
+        }
+        .onChange(of: showingTaskPicker) { _, isPresented in
+            model.isTaskPickerPresented = isPresented
+            if isPresented {
+                DispatchQueue.main.async { taskPickerSearchFocused = true }
+            } else {
+                taskPickerSearchFocused = false
             }
         }
         .onChange(of: showsDoneTasks) { wasShowing, isShowing in
@@ -983,6 +1014,11 @@ struct StickyRootView: View {
                 // maximum still gives wrapping a concrete budget without
                 // preventing the native window from becoming narrower again.
                 .frame(minWidth: 0, maxWidth: titleWidth, alignment: .topLeading)
+
+            if taskPicker != nil {
+                dailyDigestControls
+                    .padding(.top, 14)
+            }
         }
         .overlay(alignment: .topTrailing) {
             StickyTimerControl(
@@ -1095,8 +1131,8 @@ struct StickyRootView: View {
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let checklistSections {
-                        ForEach(checklistSections) { section in
-                            checklistSection(section)
+                        ForEach(Array(checklistSections.enumerated()), id: \.element.id) { index, section in
+                            checklistSection(section, addsTopSpacing: index > 0)
                         }
                     } else {
                         ForEach(displayedItems) { item in
@@ -1104,7 +1140,7 @@ struct StickyRootView: View {
                         }
                     }
 
-                    if checklistSections == nil || taskPicker != nil { addRowButton }
+                    if checklistSections == nil { addRowButton }
                 }
                 // The checklist's content stays aligned at its original x,
                 // while its scroll viewport reaches into the paper inset so
@@ -1142,7 +1178,10 @@ struct StickyRootView: View {
         .padding(.leading, -contentInset)
     }
 
-    private func checklistSection(_ section: StickyChecklistSection) -> some View {
+    private func checklistSection(
+        _ section: StickyChecklistSection,
+        addsTopSpacing: Bool
+    ) -> some View {
         let isCollapsed = collapsedSectionIDs.contains(section.id)
         let items = displayedItems.filter { section.itemIDs.contains($0.id) }
         return VStack(alignment: .leading, spacing: 0) {
@@ -1170,6 +1209,7 @@ struct StickyRootView: View {
                 ForEach(items) { item in row(item).id(item.id) }
             }
         }
+        .padding(.top, addsTopSpacing ? 18 : 0)
     }
 
     private func keepFocusedRowVisible(using proxy: ScrollViewProxy) {
@@ -1204,9 +1244,7 @@ struct StickyRootView: View {
 
         return Button {
             if taskPicker != nil {
-                taskPickerQuery = ""
-                highlightedTaskPickerID = filteredTaskPickerItems.first?.id
-                showingTaskPicker = true
+                showTaskPicker(.add)
             } else {
                 let newID = model.addItem()
                 focusItem(newID, atUTF16Offset: 0)
@@ -1231,10 +1269,86 @@ struct StickyRootView: View {
         .onHover { addRowHovered = $0 }
     }
 
+    private var dailyDigestControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Construct your focused task list for today")
+                .font(bodyFont(14))
+                .foregroundStyle(color.ink.opacity(0.48))
+
+            HStack(spacing: 20) {
+                dailyDigestButton(
+                    title: "Add task",
+                    systemImage: "plus",
+                    isHovered: addRowHovered,
+                    action: { showTaskPicker(.add) }
+                )
+                .onHover { addRowHovered = $0 }
+
+                dailyDigestButton(
+                    title: "Remove tasks",
+                    systemImage: "minus",
+                    isHovered: removeRowHovered,
+                    action: { showTaskPicker(.remove) }
+                )
+                .onHover { removeRowHovered = $0 }
+                .disabled(model.items.isEmpty)
+            }
+        }
+    }
+
+    private func dailyDigestButton(
+        title: String,
+        systemImage: String,
+        isHovered: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        let inkOpacity = isHovered ? 0.68 : 0.48
+        return Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 13, height: 22)
+                Text(title)
+                    .font(bodyFont(14))
+            }
+            .foregroundStyle(color.ink.opacity(inkOpacity))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(HoverMotion.feedback, value: isHovered)
+    }
+
+    private func showTaskPicker(_ mode: StickyTaskPickerMode) {
+        taskPickerMode = mode
+        taskPickerQuery = ""
+        taskPickerFirstVisibleIndex = 0
+        taskPickerScrollTargetID = nil
+        highlightedTaskPickerID = filteredTaskPickerItems.first?.id
+        showingTaskPicker = true
+        DispatchQueue.main.async { taskPickerSearchFocused = true }
+    }
+
     private var filteredTaskPickerItems: [StickyTaskPickerItem] {
         guard let taskPicker else { return [] }
         let query = taskPickerQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        return taskPicker.candidates().filter {
+        let candidates: [StickyTaskPickerItem]
+        switch taskPickerMode {
+        case .add:
+            candidates = taskPicker.candidates()
+        case .remove:
+            candidates = model.items.compactMap { item in
+                guard let section = checklistSections?.first(where: { $0.itemIDs.contains(item.id) }) else {
+                    return nil
+                }
+                return StickyTaskPickerItem(
+                    id: item.id,
+                    item: item,
+                    stickyID: section.id,
+                    stickyTitle: section.title
+                )
+            }
+        }
+        return candidates.filter {
             query.isEmpty || $0.item.text.localizedCaseInsensitiveContains(query)
                 || $0.stickyTitle.localizedCaseInsensitiveContains(query)
         }
@@ -1245,9 +1359,12 @@ struct StickyRootView: View {
             TextField("Search tasks", text: $taskPickerQuery)
                 .textFieldStyle(.plain)
                 .font(bodyFont(14))
+                .focused($taskPickerSearchFocused)
                 .padding(.horizontal, 14)
                 .frame(height: 42)
                 .onChange(of: taskPickerQuery) { _, _ in
+                    taskPickerFirstVisibleIndex = 0
+                    taskPickerScrollTargetID = nil
                     highlightedTaskPickerID = filteredTaskPickerItems.first?.id
                 }
 
@@ -1257,13 +1374,13 @@ struct StickyRootView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
                         if filteredTaskPickerItems.isEmpty {
-                            Text("No matching tasks")
+                            Text(taskPickerMode == .add ? "No matching tasks" : "No tasks to remove")
                                 .font(bodyFont(13))
                                 .foregroundStyle(color.ink.opacity(0.48))
                                 .padding(14)
                         } else {
                             ForEach(filteredTaskPickerItems) { candidate in
-                                Button { addTaskFromPicker(candidate) } label: {
+                                Button { performTaskPickerAction(candidate) } label: {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(candidate.item.text)
                                             .font(bodyFont(14))
@@ -1291,10 +1408,10 @@ struct StickyRootView: View {
                     }
                     .padding(8)
                 }
-                .onChange(of: highlightedTaskPickerID) { _, id in
+                .onChange(of: taskPickerScrollTargetID) { _, id in
                     guard let id else { return }
                     withAnimation(.easeOut(duration: 0.12)) {
-                        proxy.scrollTo(id, anchor: .center)
+                        proxy.scrollTo(id, anchor: taskPickerScrollAnchor)
                     }
                 }
             }
@@ -1308,7 +1425,7 @@ struct StickyRootView: View {
             guard let id = highlightedTaskPickerID,
                   let candidate = filteredTaskPickerItems.first(where: { $0.id == id })
             else { return .ignored }
-            addTaskFromPicker(candidate)
+            performTaskPickerAction(candidate)
             return .handled
         }
         .onKeyPress(.escape) { showingTaskPicker = false; return .handled }
@@ -1354,11 +1471,71 @@ struct StickyRootView: View {
         highlightedTaskPickerID = filteredTaskPickerItems.first?.id
     }
 
+    private func removeTaskFromPicker(_ candidate: StickyTaskPickerItem) {
+        model.items.removeAll { $0.id == candidate.id }
+        checklistSections = checklistSections?.compactMap { section in
+            let itemIDs = section.itemIDs.filter { $0 != candidate.id }
+            guard !itemIDs.isEmpty else { return nil }
+            return StickyChecklistSection(id: section.id, title: section.title, itemIDs: itemIDs)
+        }
+        taskPicker?.didRemove(candidate)
+        model.onChange?()
+        highlightedTaskPickerID = filteredTaskPickerItems.first?.id
+    }
+
+    private func performTaskPickerAction(_ candidate: StickyTaskPickerItem) {
+        switch taskPickerMode {
+        case .add: addTaskFromPicker(candidate)
+        case .remove: removeTaskFromPicker(candidate)
+        }
+    }
+
     private func moveTaskPickerHighlight(by change: Int) {
         let items = filteredTaskPickerItems
         guard !items.isEmpty else { return }
         let index = highlightedTaskPickerID.flatMap { id in items.firstIndex(where: { $0.id == id }) } ?? 0
-        highlightedTaskPickerID = items[min(max(index + change, 0), items.count - 1)].id
+        let nextIndex = min(max(index + change, 0), items.count - 1)
+        highlightedTaskPickerID = items[nextIndex].id
+
+        // Pointer hover only changes the highlight. Keyboard movement scrolls
+        // once the highlight reaches a viewport edge, keeping visible rows
+        // completely still and revealing one new row at a time.
+        let visibleRowCount = 5
+        if nextIndex >= taskPickerFirstVisibleIndex + visibleRowCount - 1 {
+            taskPickerFirstVisibleIndex = max(0, nextIndex - visibleRowCount + 2)
+            taskPickerScrollAnchor = .bottom
+            taskPickerScrollTargetID = items[nextIndex].id
+        } else if nextIndex < taskPickerFirstVisibleIndex {
+            taskPickerFirstVisibleIndex = nextIndex
+            taskPickerScrollAnchor = .top
+            taskPickerScrollTargetID = items[nextIndex].id
+        }
+    }
+
+    private func handleTaskPickerKey(
+        _ keyCode: UInt16,
+        modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard showingTaskPicker,
+              modifiers.intersection([.command, .control, .option]).isEmpty else { return false }
+        switch keyCode {
+        case 125: // Down
+            moveTaskPickerHighlight(by: 1)
+            return true
+        case 126: // Up
+            moveTaskPickerHighlight(by: -1)
+            return true
+        case 36, 76: // Return / keypad Enter
+            guard let id = highlightedTaskPickerID,
+                  let candidate = filteredTaskPickerItems.first(where: { $0.id == id }) else { return true }
+            performTaskPickerAction(candidate)
+            return true
+        case 53: // Escape
+            showingTaskPicker = false
+            return true
+        default:
+            return false
+        }
     }
 
     private func row(_ item: TodoItem) -> some View {
