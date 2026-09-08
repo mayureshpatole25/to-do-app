@@ -124,12 +124,28 @@ final class StickyController: NSObject, NSWindowDelegate {
         // is focused without requiring Accessibility/Input Monitoring.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.window === self.panel else { return event }
-
             let commandModifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            if event.charactersIgnoringModifiers?.lowercased() == "w", commandModifiers == .command {
+                self.closeSticky()
+                return nil
+            }
             if self.model.isTaskPickerPresented,
                self.model.onHandleTaskPickerKey?(event.keyCode, commandModifiers) == true {
                 return nil
             }
+            if self.model.onHandleSectionKey?(event.keyCode, commandModifiers) == true { return nil }
+            if commandModifiers.isEmpty, event.keyCode == 125 || event.keyCode == 126,
+               !self.model.isDateTimeFieldEditing,
+               let editor = self.panel.firstResponder as? NSTextView,
+               editor.selectedRange().length == 0 {
+                let direction = event.keyCode == 126 ? -1 : 1
+                let caret = editor.selectedRange().location
+                if self.isCaret(caret, on: direction < 0 ? .top : .bottom, in: editor) {
+                    let x = editor.firstRect(forCharacterRange: NSRange(location: caret, length: 0), actualRange: nil).minX
+                    if self.model.onNavigateTextField?(direction, x) == true { return nil }
+                }
+            }
+            if self.model.isDailyNoteEditing || self.model.isSectionEditing { return event }
             let pressedKey = event.charactersIgnoringModifiers?.lowercased()
             if pressedKey == "z", commandModifiers == .command,
                self.completionUndoManager.canUndo {
