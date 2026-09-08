@@ -1,6 +1,42 @@
 import AppKit
 import Foundation
 
+private enum DailyDigestExclusions {
+    private static let defaultsKey = "today.dailyDigestExclusions"
+    private static let dayKey = "today.dailyDigestExclusionsDay"
+
+    static func ids(now: Date = Date(), calendar: Calendar = .current) -> Set<UUID> {
+        let currentDay = dayIdentifier(now, calendar: calendar)
+        guard UserDefaults.standard.string(forKey: dayKey) == currentDay else {
+            UserDefaults.standard.set(currentDay, forKey: dayKey)
+            UserDefaults.standard.removeObject(forKey: defaultsKey)
+            return []
+        }
+        return Set((UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []).compactMap(UUID.init))
+    }
+
+    static func exclude(_ id: UUID) {
+        var values = ids()
+        values.insert(id)
+        save(values)
+    }
+
+    static func include(_ id: UUID) {
+        var values = ids()
+        values.remove(id)
+        save(values)
+    }
+
+    private static func save(_ ids: Set<UUID>) {
+        UserDefaults.standard.set(ids.map(\.uuidString), forKey: defaultsKey)
+    }
+
+    private static func dayIdentifier(_ date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return "\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)"
+    }
+}
+
 @MainActor
 private struct DailyDigestSelection {
     let items: [TodoItem]
@@ -16,11 +52,13 @@ private struct DailyDigestSelection {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)
             ?? today.addingTimeInterval(86_400)
         var selectedIDs = Set<UUID>()
+        let excludedIDs = DailyDigestExclusions.ids(now: now, calendar: calendar)
 
         for stickyID in manager.order {
             guard let model = manager.controllers[stickyID]?.model else { continue }
             for item in model.items where !item.isDone && hasText(item) {
-                if let dueDate = item.dueDate, dueDate >= today && dueDate < tomorrow {
+                if !excludedIDs.contains(item.id),
+                   let dueDate = item.dueDate, dueDate >= today && dueDate < tomorrow {
                     selectedIDs.insert(item.id)
                 }
             }
@@ -30,7 +68,8 @@ private struct DailyDigestSelection {
         for stickyID in manager.order where priorityIDs.count < 3 {
             guard let model = manager.controllers[stickyID]?.model,
                   let item = model.items.first(where: {
-                      !$0.isDone && $0.priority == .high && !selectedIDs.contains($0.id) && hasText($0)
+                      !$0.isDone && $0.priority == .high && !selectedIDs.contains($0.id)
+                          && !excludedIDs.contains($0.id) && hasText($0)
                   }) else { continue }
             priorityIDs.insert(item.id)
         }
@@ -40,6 +79,7 @@ private struct DailyDigestSelection {
                 for item in model.items where priorityIDs.count < 3
                     && !item.isDone && item.priority == .high
                     && !selectedIDs.contains(item.id) && !priorityIDs.contains(item.id)
+                    && !excludedIDs.contains(item.id)
                     && hasText(item) {
                     priorityIDs.insert(item.id)
                 }
@@ -139,6 +179,11 @@ private final class DailyDigestProjection {
 
     func registerAddedTask(_ candidate: StickyTaskPickerItem) {
         sourceStickyByItemID[candidate.id] = candidate.stickyID
+        DailyDigestExclusions.include(candidate.id)
+    }
+
+    func registerRemovedTask(_ candidate: StickyTaskPickerItem) {
+        DailyDigestExclusions.exclude(candidate.id)
     }
 
     private static let titleFormatter: DateFormatter = {
@@ -159,7 +204,8 @@ final class DailyDigestWindowController {
         self.projection = projection
         let taskPicker = StickyTaskPickerConfiguration(
             candidates: { [weak projection] in projection?.pickerCandidates() ?? [] },
-            didAdd: { [weak projection] candidate in projection?.registerAddedTask(candidate) }
+            didAdd: { [weak projection] candidate in projection?.registerAddedTask(candidate) },
+            didRemove: { [weak projection] candidate in projection?.registerRemovedTask(candidate) }
         )
         stickyController = StickyController(
             model: projection.model,

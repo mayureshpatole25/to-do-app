@@ -82,6 +82,10 @@ final class StickyModel: Identifiable {
     /// Lets the custom date popover consume Escape, Return, and arrow keys
     /// before the normal cross-row editing commands see them.
     @ObservationIgnored var onHandleDatePickerKey: ((UInt16, NSEvent.ModifierFlags) -> Bool)?
+    /// Gives an open in-sticky picker first refusal over navigation keys so
+    /// the checklist editor behind it cannot move while the picker is active.
+    @ObservationIgnored var onHandleTaskPickerKey: ((UInt16, NSEvent.ModifierFlags) -> Bool)?
+    @ObservationIgnored var isTaskPickerPresented = false
     @ObservationIgnored var onHandleDateTokenKey: ((UInt16, NSEvent.ModifierFlags, NSRange) -> Bool)?
     @ObservationIgnored var onNormalizeDateTokenSelection: ((NSRange) -> NSRange?)?
     /// While the popover's time input is active, its native TextField must

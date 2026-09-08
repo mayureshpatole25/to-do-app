@@ -334,6 +334,7 @@ private struct QuickCaptureView: View {
     @State private var revealProgress: CGFloat = 0.02
     @State private var revealCorner = RevealCorner.topLeading
     @State private var revealGeneration = UUID()
+    @State private var stickyPaletteFirstVisibleIndex = 0
 
     private enum Field { case task, newSticky, stickySearch }
 
@@ -380,6 +381,7 @@ private struct QuickCaptureView: View {
                 .frame(height: 53)
                 .onChange(of: model.stickyQuery) { _, _ in
                     model.highlightedStickyIndex = 0
+                    stickyPaletteFirstVisibleIndex = 0
                 }
 
             Rectangle()
@@ -618,8 +620,17 @@ private struct QuickCaptureView: View {
                 }
                 .onChange(of: model.highlightedStickyIndex) { _, index in
                     guard matches.indices.contains(index) else { return }
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        proxy.scrollTo(matches[index].id, anchor: .center)
+                    let visibleRowCount = 5
+                    if index >= stickyPaletteFirstVisibleIndex + visibleRowCount - 1 {
+                        stickyPaletteFirstVisibleIndex = max(0, index - visibleRowCount + 2)
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(matches[index].id, anchor: .bottom)
+                        }
+                    } else if index < stickyPaletteFirstVisibleIndex {
+                        stickyPaletteFirstVisibleIndex = index
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(matches[index].id, anchor: .top)
+                        }
                     }
                 }
             }
