@@ -86,6 +86,11 @@ final class StickyModel: Identifiable {
     /// the checklist editor behind it cannot move while the picker is active.
     @ObservationIgnored var onHandleTaskPickerKey: ((UInt16, NSEvent.ModifierFlags) -> Bool)?
     @ObservationIgnored var isTaskPickerPresented = false
+    @ObservationIgnored var isDailyNoteEditing = false
+    @ObservationIgnored var isSectionEditing = false
+    @ObservationIgnored var onHandleSectionKey: ((UInt16, NSEvent.ModifierFlags) -> Bool)?
+    @ObservationIgnored var onNavigateTextField: ((Int, CGFloat) -> Bool)?
+    var dailyNote = ""
     @ObservationIgnored var onHandleDateTokenKey: ((UInt16, NSEvent.ModifierFlags, NSRange) -> Bool)?
     @ObservationIgnored var onNormalizeDateTokenSelection: ((NSRange) -> NSRange?)?
     /// While the popover's time input is active, its native TextField must

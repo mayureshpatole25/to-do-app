@@ -662,7 +662,7 @@ private enum TimerReturnFocus {
     case item(UUID, offset: Int)
 }
 
-struct StickyChecklistSection: Identifiable {
+struct StickyChecklistSection: Identifiable, Codable {
     let id: UUID
     let title: String
     let itemIDs: [UUID]
@@ -676,6 +676,7 @@ struct StickyTaskPickerItem: Identifiable {
 }
 
 struct StickyTaskPickerConfiguration {
+    var sectionsChanged: (([StickyChecklistSection]) -> Void)? = nil
     let candidates: () -> [StickyTaskPickerItem]
     let didAdd: (StickyTaskPickerItem) -> Void
     let didRemove: (StickyTaskPickerItem) -> Void
@@ -698,6 +699,8 @@ struct StickyRootView: View {
     @FocusState private var focusedID: UUID?
     @FocusState private var titleFocused: Bool
     @FocusState private var taskPickerSearchFocused: Bool
+    @FocusState private var dailyNoteFocused: Bool
+    @FocusState private var focusedSectionID: UUID?
     @State private var hovering = false
     @State private var hoveringTopChrome = false
     @State private var showColors = false
@@ -710,6 +713,10 @@ struct StickyRootView: View {
     @State private var reduceMotionEnabled = false
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var draggingItemID: UUID?
+    @State private var draggingSectionID: UUID?
+    @State private var sectionDragY: CGFloat = 0
+    @State private var sectionDragOriginY: CGFloat = 0
+    @State private var suppressedSectionToggleID: UUID?
     @State private var dragTranslationY: CGFloat = 0
     @State private var dragLayoutCompensationY: CGFloat = 0
     @State private var pressedCheckboxID: UUID?
@@ -839,7 +846,22 @@ struct StickyRootView: View {
                 }
             }
             model.onRequestLastItemFocus = {
-                focusLastItemForTyping()
+                if taskPicker != nil {
+                    dailyNoteFocused = true
+                } else {
+                    focusLastItemForTyping()
+                }
+            }
+            model.onHandleSectionKey = { key, modifiers in
+                guard let id = focusedSectionID else { return false }
+                if modifiers == .command, key == 36 || key == 76 {
+                    toggleSection(id)
+                    return true
+                }
+                return false
+            }
+            model.onNavigateTextField = { direction, x in
+                navigateTextField(direction: direction, screenX: x)
             }
             model.onToggleDoneVisibility = {
                 toggleDoneTaskVisibility()
@@ -879,9 +901,17 @@ struct StickyRootView: View {
             model.onWillSetDone = { id, isDone in
                 prepareDoneTransition(id: id, isDone: isDone)
             }
-            focusLastItemForTyping()
+            if taskPicker != nil {
+                DispatchQueue.main.async { dailyNoteFocused = true }
+            } else {
+                focusLastItemForTyping()
+            }
         }
         .onDisappear {
+            model.onHandleSectionKey = nil
+            model.onNavigateTextField = nil
+            model.isSectionEditing = false
+            model.isDailyNoteEditing = false
             model.onWillSetDone = nil
             model.onToggleDoneVisibility = nil
             model.onHandleDatePickerKey = nil
@@ -918,6 +948,8 @@ struct StickyRootView: View {
         }
         .onChange(of: focusedID) { _, new in model.focusedItemID = new }
         .onChange(of: titleFocused) { _, new in model.isTitleFocused = new }
+        .onChange(of: dailyNoteFocused) { _, new in model.isDailyNoteEditing = new }
+        .onChange(of: focusedSectionID) { _, new in model.isSectionEditing = new != nil }
     }
 
     /// The flat paper itself.
@@ -1185,31 +1217,110 @@ struct StickyRootView: View {
         let isCollapsed = collapsedSectionIDs.contains(section.id)
         let items = displayedItems.filter { section.itemIDs.contains($0.id) }
         return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeOut(duration: 0.16)) {
-                    if isCollapsed { collapsedSectionIDs.remove(section.id) }
-                    else { collapsedSectionIDs.insert(section.id) }
-                }
-            } label: {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    guard suppressedSectionToggleID != section.id else { return }
+                    toggleSection(section.id)
+                } label: {
                     Image(systemName: "triangle.fill")
                         .font(.system(size: 8, weight: .semibold))
                         .rotationEffect(.degrees(isCollapsed ? 90 : 180))
-                    Text(section.title)
-                        .font(bodyFont(14).weight(.medium))
-                    Spacer(minLength: 0)
+                        .frame(width: 14, height: 34)
+                        .contentShape(Rectangle())
                 }
-                .foregroundStyle(color.ink.opacity(0.72))
-                .frame(minHeight: 34)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .simultaneousGesture(sectionReorderGesture(section.id))
+                TextField("", text: Binding(
+                    get: { checklistSections?.first(where: { $0.id == section.id })?.title ?? section.title },
+                    set: { name in
+                        guard let index = checklistSections?.firstIndex(where: { $0.id == section.id }) else { return }
+                        checklistSections?[index] = StickyChecklistSection(id: section.id, title: name, itemIDs: section.itemIDs)
+                        taskPicker?.sectionsChanged?(checklistSections ?? [])
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .font(bodyFont(14).weight(.medium))
+                .focused($focusedSectionID, equals: section.id)
+                .simultaneousGesture(sectionReorderGesture(section.id))
             }
-            .buttonStyle(.plain)
+            .foregroundStyle(color.ink.opacity(0.72))
+            .frame(minHeight: 34)
 
             if !isCollapsed {
                 ForEach(items) { item in row(item).id(item.id) }
             }
         }
         .padding(.top, addsTopSpacing ? 18 : 0)
+        .offset(y: draggingSectionID == section.id
+            ? sectionDragY + sectionDragOriginY - (rowFrames[section.id]?.minY ?? sectionDragOriginY) : 0)
+        .background(GeometryReader { proxy in
+            Color.clear.preference(key: ChecklistRowFramePreferenceKey.self,
+                value: [section.id: proxy.frame(in: .named("checklist"))])
+        })
+        .zIndex(draggingSectionID == section.id ? 2 : 0)
+        .transaction { if draggingSectionID == section.id { $0.animation = nil } }
+    }
+
+    private func sectionReorderGesture(_ id: UUID) -> some Gesture {
+        DragGesture(minimumDistance: 7, coordinateSpace: .named("checklist"))
+            .onChanged { value in
+                if draggingSectionID == nil {
+                    guard let frame = rowFrames[id] else { return }
+                    draggingSectionID = id
+                    sectionDragOriginY = frame.minY
+                    suppressedSectionToggleID = id
+                    focusedSectionID = nil
+                    focusedID = nil
+                }
+                guard draggingSectionID == id, var sections = checklistSections,
+                      let index = sections.firstIndex(where: { $0.id == id }) else { return }
+                sectionDragY = value.translation.height
+                var target = index
+                if index + 1 < sections.count,
+                   let frame = rowFrames[sections[index + 1].id], value.location.y > frame.midY {
+                    target = index + 1
+                } else if index > 0,
+                          let frame = rowFrames[sections[index - 1].id], value.location.y < frame.midY {
+                    target = index - 1
+                }
+                guard target != index else { return }
+                let section = sections.remove(at: index)
+                sections.insert(section, at: target)
+                withAnimation(accessibilityReduceMotion ? nil : .interactiveSpring(response: 0.3, dampingFraction: 1, blendDuration: 0)) {
+                    checklistSections = sections
+                }
+            }
+            .onEnded { _ in
+                guard draggingSectionID == id else { return }
+                withAnimation(accessibilityReduceMotion ? nil : .interactiveSpring(response: 0.3, dampingFraction: 1, blendDuration: 0)) {
+                    draggingSectionID = nil
+                    sectionDragY = 0
+                }
+                taskPicker?.sectionsChanged?(checklistSections ?? [])
+                DispatchQueue.main.async { suppressedSectionToggleID = nil }
+            }
+    }
+
+    private func moveFromSection(_ id: UUID, direction: Int) {
+        guard let sections = checklistSections,
+              let index = sections.firstIndex(where: { $0.id == id }) else { return }
+        if direction < 0 {
+            guard index > 0 else {
+                focusedSectionID = nil
+                dailyNoteFocused = true
+                return
+            }
+            let previous = sections[index - 1]
+            if !collapsedSectionIDs.contains(previous.id),
+               let item = displayedItems.last(where: { previous.itemIDs.contains($0.id) }) {
+                focusedSectionID = nil
+                focusItem(item.id, atUTF16Offset: (item.text as NSString).length)
+            } else { focusedSectionID = previous.id }
+        } else if !collapsedSectionIDs.contains(id),
+                  let item = displayedItems.first(where: { sections[index].itemIDs.contains($0.id) }) {
+            focusedSectionID = nil
+            focusItem(item.id, atUTF16Offset: 0)
+        } else if index + 1 < sections.count { focusedSectionID = sections[index + 1].id }
     }
 
     private func keepFocusedRowVisible(using proxy: ScrollViewProxy) {
@@ -1220,6 +1331,13 @@ struct StickyRootView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             proxy.scrollTo(focusedID, anchor: .center)
+        }
+    }
+
+    private func toggleSection(_ id: UUID) {
+        withAnimation(.easeOut(duration: 0.16)) {
+            if collapsedSectionIDs.contains(id) { collapsedSectionIDs.remove(id) }
+            else { collapsedSectionIDs.insert(id) }
         }
     }
 
@@ -1271,7 +1389,14 @@ struct StickyRootView: View {
 
     private var dailyDigestControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Construct your focused task list for today")
+            TextField("what are we focussing on today", text: Binding(
+                get: { model.dailyNote },
+                set: { model.dailyNote = $0; model.onChange?() }
+            ), axis: .vertical)
+                .textFieldStyle(.plain)
+                .focused($dailyNoteFocused)
+                .lineLimit(1...5)
+                .tint(color.ink)
                 .font(bodyFont(14))
                 .foregroundStyle(color.ink.opacity(0.48))
 
@@ -2194,6 +2319,61 @@ struct StickyRootView: View {
 
     // MARK: - Editing helpers
 
+    private enum TextDestination: Equatable {
+        case title, note, section(UUID), item(UUID)
+    }
+
+    private func navigateTextField(direction: Int, screenX: CGFloat) -> Bool {
+        guard !showingTaskPicker, dateDraft == nil else { return false }
+        var fields: [TextDestination] = [.title]
+        if taskPicker != nil { fields.append(.note) }
+        if let sections = checklistSections {
+            for section in sections {
+                fields.append(.section(section.id))
+                if !collapsedSectionIDs.contains(section.id) {
+                    fields.append(contentsOf: displayedItems.filter {
+                        section.itemIDs.contains($0.id)
+                    }.map { .item($0.id) })
+                }
+            }
+        } else {
+            fields.append(contentsOf: displayedItems.map { .item($0.id) })
+        }
+        let current: TextDestination
+        if dailyNoteFocused { current = .note }
+        else if let id = focusedSectionID { current = .section(id) }
+        else if titleFocused { current = .title }
+        else if let id = focusedID { current = .item(id) }
+        else { return false }
+        guard let index = fields.firstIndex(of: current) else { return false }
+        let next = index + direction
+        guard fields.indices.contains(next) else { return true }
+        dailyNoteFocused = false
+        focusedSectionID = nil
+        focusedID = nil
+        titleFocused = false
+        let edge: StickyCaretEdge = direction < 0 ? .bottom : .top
+        switch fields[next] {
+        case .title:
+            focusTitle(alignedToScreenX: screenX, entering: edge)
+        case .item(let id):
+            focusItem(id, alignedToScreenX: screenX, entering: edge)
+        case .note, .section:
+            let destination = fields[next]
+            DispatchQueue.main.async {
+                if case .section(let id) = destination { focusedSectionID = id }
+                else { dailyNoteFocused = true }
+                DispatchQueue.main.async {
+                    guard let editor = controller.panel.firstResponder as? NSTextView else { return }
+                    let offset = direction < 0 ? (editor.string as NSString).length : 0
+                    editor.setSelectedRange(NSRange(location: offset, length: 0))
+                    editor.scrollRangeToVisible(editor.selectedRange())
+                }
+            }
+        }
+        return true
+    }
+
     private func submit(_ item: TodoItem) {
         guard !isBlank(bindingValue(item)) else { return }
         let newID = model.addItem(after: item)
@@ -2204,6 +2384,20 @@ struct StickyRootView: View {
     /// visual lines within the current field. The controller restores the
     /// caret at the closest screen-space x on the destination edge.
     private func moveCaretVertically(from sourceID: UUID?, direction: Int, screenX: CGFloat) {
+        if let sourceID, let sections = checklistSections,
+           let index = sections.firstIndex(where: { $0.itemIDs.contains(sourceID) }) {
+            let visible = displayedItems.filter { sections[index].itemIDs.contains($0.id) }
+            if direction < 0, visible.first?.id == sourceID {
+                focusedID = nil
+                focusedSectionID = sections[index].id
+                return
+            }
+            if direction > 0, visible.last?.id == sourceID, index + 1 < sections.count {
+                focusedID = nil
+                focusedSectionID = sections[index + 1].id
+                return
+            }
+        }
         let ordered = displayedItems
         if sourceID == nil {
             guard direction > 0, let first = ordered.first else { return }
