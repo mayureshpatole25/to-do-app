@@ -22,6 +22,9 @@ struct StickyData: Codable, Identifiable {
     var fontID: StickyFont
     var frame: CGRect
     var isVisible: Bool
+    /// Per-sticky presentation preference. Optional keeps older save files
+    /// decodable and defaults their uncluttered view to priorities hidden.
+    var showsPriorities: Bool?
 }
 
 /// Runtime model for a single sticky. SwiftUI observes it directly.
@@ -37,6 +40,7 @@ final class StickyModel: Identifiable {
     var fontID: StickyFont
     var frame: CGRect
     var isVisible: Bool
+    var showsPriorities: Bool
 
     /// Called on any change that should be persisted (routed to the manager).
     @ObservationIgnored var onChange: (() -> Void)?
@@ -117,6 +121,7 @@ final class StickyModel: Identifiable {
         // the panel. Valid user-selected heights are preserved.
         self.frame = StickyWindowGeometry.persistedFrame(data.frame)
         self.isVisible = data.isVisible
+        self.showsPriorities = data.showsPriorities ?? false
 
         // Merge a split-out icon straight back into the title, exactly as
         // if it had never left — see the `emoji` doc comment on StickyData.
@@ -134,7 +139,7 @@ final class StickyModel: Identifiable {
         StickyData(id: id, title: title, emoji: nil, day: day, items: items,
                    colorID: colorID, fontID: fontID,
                    frame: StickyWindowGeometry.runtimeFrame(frame),
-                   isVisible: isVisible)
+                   isVisible: isVisible, showsPriorities: showsPriorities)
     }
 
     // MARK: - Ordering
@@ -210,6 +215,30 @@ final class StickyModel: Identifiable {
     func setDueDate(_ id: UUID, _ dueDate: Date?) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].dueDate = dueDate
+        onChange?()
+    }
+
+    func setPriority(_ id: UUID, _ priority: TaskPriority) {
+        guard let idx = items.firstIndex(where: { $0.id == id }),
+              items[idx].priority != priority else { return }
+        items[idx].priority = priority
+        onChange?()
+    }
+
+    func togglePriorityVisibility() {
+        showsPriorities.toggle()
+        onChange?()
+    }
+
+    func sortItemsByPriority(highestFirst: Bool) {
+        let ranked = items.enumerated().sorted { lhs, rhs in
+            let leftRank = lhs.element.priority.sortRank
+            let rightRank = rhs.element.priority.sortRank
+            if leftRank == rightRank { return lhs.offset < rhs.offset }
+            return highestFirst ? leftRank > rightRank : leftRank < rightRank
+        }.map(\.element)
+        guard ranked != items else { return }
+        items = ranked
         onChange?()
     }
 
@@ -350,7 +379,8 @@ final class StickyModel: Identifiable {
             colorID: color,
             fontID: font,
             frame: CGRect(origin: origin, size: StickyData.defaultSize),
-            isVisible: true
+            isVisible: true,
+            showsPriorities: false
         )
         return StickyModel(data: data)
     }

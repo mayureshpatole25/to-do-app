@@ -687,6 +687,8 @@ struct StickyRootView: View {
     @State private var dragLayoutCompensationY: CGFloat = 0
     @State private var pressedCheckboxID: UUID?
     @State private var hoveredCheckboxID: UUID?
+    @State private var hoveredPriorityID: UUID?
+    @State private var priorityPopoverItemID: UUID?
     @State private var addRowHovered = false
     @State private var suppressCheckboxToggleID: UUID?
     @State private var dateDraft: TaskDateDraft?
@@ -1231,6 +1233,11 @@ struct StickyRootView: View {
                         )
                     }
                     .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+
+                    if model.showsPriorities {
+                        priorityMenu(for: currentItem)
+                            .padding(.leading, 2)
+                    }
                 }
                 .padding(.vertical, 6)
                 .padding(.leading, CGFloat(item.indentLevel) * 24)
@@ -1459,6 +1466,76 @@ struct StickyRootView: View {
         }
     }
 
+    private func priorityMenu(for item: TodoItem) -> some View {
+        let isHovered = hoveredPriorityID == item.id
+
+        return Button {
+            priorityPopoverItemID = priorityPopoverItemID == item.id ? nil : item.id
+        } label: {
+            Image(item.priority.assetName)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 16, height: 16)
+                .foregroundStyle(color.ink)
+                .frame(width: 24, height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(item.isDone ? 0.3 : (isHovered ? 0.8 : 0.6))
+        .scaleEffect(isHovered && !accessibilityReduceMotion ? 1.1 : 1)
+        .animation(HoverMotion.feedback, value: isHovered)
+        .onHover { hoveredPriorityID = $0 ? item.id : nil }
+        .fixedSize()
+        .accessibilityLabel("Priority: \(item.priority.label)")
+        .help("Change priority")
+        .popover(
+            isPresented: Binding(
+                get: { priorityPopoverItemID == item.id },
+                set: { if !$0 { priorityPopoverItemID = nil } }
+            ),
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .trailing
+        ) {
+            priorityPicker(for: item)
+        }
+    }
+
+    private func priorityPicker(for item: TodoItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach([TaskPriority.high, .medium, .low, .none]) { priority in
+                Button {
+                    model.setPriority(item.id, priority)
+                    priorityPopoverItemID = nil
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(priority.assetName)
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                        Text(priority.label)
+                            .font(bodyFont(14))
+                        Spacer(minLength: 16)
+                        if item.priority == priority {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                    }
+                    .foregroundStyle(color.ink.opacity(0.8))
+                    .padding(.horizontal, 10)
+                    .frame(height: 34)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverFeedback(scale: 1, darkening: -0.06)
+            }
+        }
+        .padding(8)
+        .frame(width: 210)
+        .background(color.paper)
+    }
+
     private func finishReordering() {
         let animation: Animation? = accessibilityReduceMotion
             ? nil
@@ -1665,6 +1742,39 @@ struct StickyRootView: View {
                 .hoverFeedback(scale: 1.1, darkening: -0.05)
                 .accessibilityLabel(showsTimer ? "Hide timer" : "Show timer")
                 .help(showsTimer ? "Hide timer" : "Show timer")
+
+                HStack(spacing: 4) {
+                    Button { model.togglePriorityVisibility() } label: {
+                        Image(model.showsPriorities ? "CellSignalFull" : "CellSignalNone")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 14, height: 14)
+                    }
+                    .opacity(model.showsPriorities ? 1 : 0.55)
+                    .hoverFeedback(scale: 1.1, darkening: -0.05)
+                    .accessibilityLabel(model.showsPriorities ? "Hide task priorities" : "Show task priorities")
+                    .help(model.showsPriorities ? "Hide task priorities" : "Show task priorities")
+
+                    Menu {
+                        Button("Highest priority first") {
+                            model.sortItemsByPriority(highestFirst: true)
+                        }
+                        Button("Lowest priority first") {
+                            model.sortItemsByPriority(highestFirst: false)
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 12, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .disabled(!model.showsPriorities)
+                    .opacity(model.showsPriorities ? 1 : 0.25)
+                    .hoverFeedback(scale: 1.1, darkening: -0.05, isEnabled: model.showsPriorities)
+                    .accessibilityLabel("Sort tasks by priority")
+                    .help("Sort tasks by priority")
+                }
 
                 Button { controller.requestClose() } label: {
                     Image(systemName: "archivebox")
