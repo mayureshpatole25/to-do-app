@@ -145,6 +145,17 @@ final class StickyController: NSObject, NSWindowDelegate {
                     if self.model.onNavigateTextField?(direction, x) == true { return nil }
                 }
             }
+            if self.model.isDailyNoteEditing,
+               !self.model.isTaskPickerPresented,
+               event.keyCode == 36 || event.keyCode == 76,
+               commandModifiers.isSubset(of: .shift),
+               let editor = self.panel.firstResponder as? NSTextView {
+                // Insert through the native editor so selection replacement,
+                // undo, caret placement and the SwiftUI binding stay in sync.
+                editor.insertText("\n", replacementRange: editor.selectedRange())
+                editor.scrollRangeToVisible(editor.selectedRange())
+                return nil
+            }
             if self.model.isDailyNoteEditing || self.model.isSectionEditing { return event }
             let pressedKey = event.charactersIgnoringModifiers?.lowercased()
             if pressedKey == "z", commandModifiers == .command,
