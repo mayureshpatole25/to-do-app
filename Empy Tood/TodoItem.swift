@@ -1,5 +1,41 @@
 import Foundation
 
+enum TaskPriority: String, CaseIterable, Codable, Identifiable {
+    case none
+    case low
+    case medium
+    case high
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .none: return "No priority"
+        case .low: return "Low priority"
+        case .medium: return "Medium priority"
+        case .high: return "High priority"
+        }
+    }
+
+    var assetName: String {
+        switch self {
+        case .none: return "CellSignalNone"
+        case .low: return "CellSignalLow"
+        case .medium: return "CellSignalMedium"
+        case .high: return "CellSignalFull"
+        }
+    }
+
+    var sortRank: Int {
+        switch self {
+        case .none: return 0
+        case .low: return 1
+        case .medium: return 2
+        case .high: return 3
+        }
+    }
+}
+
 /// A single checklist line. Named `TodoItem` to avoid colliding with Swift's `Task`.
 struct TodoItem: Identifiable, Codable, Equatable {
     static let maximumIndentLevel = 3
@@ -23,6 +59,9 @@ struct TodoItem: Identifiable, Codable, Equatable {
 
     var recurrence: TaskRecurrence?
     var occurrenceHistory: [TaskOccurrence]?
+    /// Optional planning signal. `.none` is the quiet, empty triangle shown
+    /// when a sticky has priority controls enabled.
+    var priority: TaskPriority
 
     init(
         id: UUID = UUID(),
@@ -33,7 +72,8 @@ struct TodoItem: Identifiable, Codable, Equatable {
         dueDate: Date? = nil,
         dueDateText: String? = nil,
         dueDateOffset: Int? = nil,
-        dueDateHasTime: Bool? = nil
+        dueDateHasTime: Bool? = nil,
+        priority: TaskPriority = .none
     ) {
         self.id = id
         self.text = text
@@ -44,6 +84,7 @@ struct TodoItem: Identifiable, Codable, Equatable {
         self.dueDateText = dueDateText
         self.dueDateOffset = dueDateOffset
         self.dueDateHasTime = dueDateHasTime
+        self.priority = priority
     }
 
     mutating func adjustIndent(by change: Int) {
@@ -55,7 +96,7 @@ struct TodoItem: Identifiable, Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, text, isDone, completedAt, indentLevel, dueDate, dueDateText, dueDateOffset, dueDateHasTime, recurrence, occurrenceHistory
+        case id, text, isDone, completedAt, indentLevel, dueDate, dueDateText, dueDateOffset, dueDateHasTime, recurrence, occurrenceHistory, priority
     }
 
     init(from decoder: Decoder) throws {
@@ -73,6 +114,7 @@ struct TodoItem: Identifiable, Codable, Equatable {
         dueDateText = try container.decodeIfPresent(String.self, forKey: .dueDateText)
         dueDateOffset = try container.decodeIfPresent(Int.self, forKey: .dueDateOffset)
         dueDateHasTime = try container.decodeIfPresent(Bool.self, forKey: .dueDateHasTime)
+        priority = try container.decodeIfPresent(TaskPriority.self, forKey: .priority) ?? .none
     }
 
     var dueDateRange: NSRange? {
