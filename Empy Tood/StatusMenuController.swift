@@ -10,12 +10,17 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     init(manager: StickyManager, appDelegate: AppDelegate) {
         self.manager = manager
         self.appDelegate = appDelegate
-        self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
 
         if let button = statusItem.button {
             button.image = Self.makeMenuBarIcon()
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.toolTip = AppIdentity.displayName
+            button.setAccessibilityLabel("\(AppIdentity.displayName) menu")
         }
+        statusItem.isVisible = true
 
         let menu = NSMenu()
         menu.delegate = self
@@ -265,9 +270,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     /// template image so AppKit fills it black on a light menu bar and white
     /// on a dark one automatically.
     private static func makeMenuBarIcon() -> NSImage {
-        let source = NSImage(named: "MenuBarFrog") ?? NSImage()
+        guard let source = NSImage(named: "MenuBarFrog") else {
+            let fallback = NSImage(
+                systemSymbolName: "checkmark.square",
+                accessibilityDescription: "Empy Tood"
+            ) ?? NSImage(size: NSSize(width: 18, height: 18))
+            fallback.isTemplate = true
+            return fallback
+        }
         let aspect = source.size.width > 0 ? source.size.height / source.size.width : 1
-        let size = NSSize(width: 20, height: 20 * aspect)
+        let size = NSSize(width: 18, height: 18 * aspect)
         let image = NSImage(size: size, flipped: false) { rect in
             source.draw(in: rect)
             return true

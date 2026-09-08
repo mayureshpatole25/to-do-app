@@ -25,6 +25,7 @@ struct HomeView: View {
     static let minimumSize = CGSize(width: 720, height: 770)
 
     let manager: StickyManager
+    var onShowDailyDigest: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var locationLabel: String?
@@ -253,7 +254,10 @@ struct HomeView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                 Spacer(minLength: 0)
-                newToDoListButton.fixedSize()
+                VStack(alignment: .trailing, spacing: 8) {
+                    newToDoListButton.fixedSize()
+                    dailyDigestButton
+                }
             }
             Text(dateLine)
                 .font(.system(size: 14))
@@ -475,14 +479,32 @@ struct HomeView: View {
                     .font(.system(size: 13, weight: .medium))
             }
             .foregroundStyle(desk)
-            .padding(.horizontal, 18)
-            .frame(height: 48)
+            .padding(.horizontal, 14)
+            .frame(width: 158, height: 30)
             .background(Color(hex: 0x20211E), in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)
         .help("Create a new to-do list")
+    }
+
+    private var dailyDigestButton: some View {
+        Button(action: onShowDailyDigest) {
+            HStack(spacing: 8) {
+                Image(systemName: "sun.max")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Today's List")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundStyle(Color(hex: 0x20211E))
+            .frame(width: 158, height: 30)
+            .background(desk, in: Capsule())
+            .overlay(Capsule().stroke(Color.primary.opacity(0.15), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Open today's focused task list")
     }
 
     private static let dateFormatter: DateFormatter = {
