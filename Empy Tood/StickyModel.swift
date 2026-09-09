@@ -151,11 +151,13 @@ final class StickyModel: Identifiable {
     var paperColor: Color {
         customColorHex.flatMap(Color.init(stickyHex:)) ?? colorID.paper
     }
+    var renderedColor: StickyRenderedColor { StickyRenderedColor(paper: paperColor) }
     var font: StickyFont { fontID }
 
     func snapshot() -> StickyData {
         StickyData(id: id, title: title, emoji: nil, day: day, items: items,
-                   colorID: colorID, customColorHex: customColorHex, fontID: fontID,
+                   colorID: colorID, customColorHex: customColorHex,
+                   fontID: fontID,
                    frame: StickyWindowGeometry.runtimeFrame(frame),
                    isVisible: isVisible, showsPriorities: showsPriorities)
     }
@@ -388,6 +390,7 @@ final class StickyModel: Identifiable {
         customColorHex = hex
         onChange?()
     }
+
     func setFont(_ f: StickyFont) { fontID = f; onChange?() }
     func setTitle(_ t: String) { title = t; onChange?() }
 
@@ -414,7 +417,39 @@ final class StickyModel: Identifiable {
     }
 }
 
+struct StickyRenderedColor {
+    let paper: Color
+    let ink: Color
+    let titleInk: Color
+    let inkSecondary: Color
+    let divider: Color
+
+    init(paper: Color) {
+        self.paper = paper
+        let foreground = paper.prefersLightStickyInk ? Color.white : Color(hex: 0x20211E)
+        self.ink = foreground
+        self.titleInk = foreground
+        self.inkSecondary = foreground.opacity(0.48)
+        self.divider = foreground.opacity(0.18)
+    }
+}
+
 private extension Color {
+    var prefersLightStickyInk: Bool {
+        guard let rgb = NSColor(self).usingColorSpace(.sRGB) else { return false }
+        func linear(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(rgb.redComponent)
+            + 0.7152 * linear(rgb.greenComponent)
+            + 0.0722 * linear(rgb.blueComponent)
+        let blackContrast = (luminance + 0.05) / 0.05
+        let whiteContrast = 1.05 / (luminance + 0.05)
+        return whiteContrast > blackContrast
+    }
+
     init?(stickyHex: String) {
         let value = stickyHex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
         guard [6, 8].contains(value.count), let rgba = UInt32(value, radix: 16) else { return nil }

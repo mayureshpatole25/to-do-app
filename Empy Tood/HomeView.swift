@@ -535,7 +535,7 @@ struct StickyDeskCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(model.title.isEmpty ? "To Do" : model.title)
                     .font(.custom("HelveticaNeue", size: 17))
-                    .foregroundStyle(model.color.titleInk)
+                    .foregroundStyle(model.renderedColor.titleInk)
                     .lineLimit(1)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -546,22 +546,22 @@ struct StickyDeskCard: View {
                             ZStack {
                                 if item.isDone {
                                     RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                        .fill(model.color.ink.opacity(0.3))
+                                        .fill(model.renderedColor.ink.opacity(0.3))
                                         .frame(width: 11, height: 11)
                                     Image(systemName: "checkmark")
                                         .font(.system(size: 7, weight: .bold))
                                         .foregroundStyle(model.paperColor)
                                 } else {
                                     RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                        .stroke(model.color.ink.opacity(0.3), lineWidth: 1.1)
+                                        .stroke(model.renderedColor.ink.opacity(0.3), lineWidth: 1.1)
                                         .frame(width: 11, height: 11)
                                 }
                             }
                             .frame(width: 11, height: 11)
                             Text(item.text.isEmpty ? " " : item.text)
                                 .font(model.font.body(12.5))
-                                .foregroundStyle(item.isDone ? model.color.inkSecondary : model.color.ink.opacity(0.8))
-                                .strikethrough(item.isDone, color: model.color.inkSecondary)
+                                .foregroundStyle(item.isDone ? model.renderedColor.inkSecondary : model.renderedColor.ink.opacity(0.8))
+                                .strikethrough(item.isDone, color: model.renderedColor.inkSecondary)
                                 .lineLimit(1)
                         }
                     }

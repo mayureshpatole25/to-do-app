@@ -23,6 +23,38 @@ private enum DailyDigestHistory {
     }
 }
 
+private enum DailyDigestWindowGeometry {
+    private static let defaultsKey = "today.dailyDigestWindowFrame"
+    private static let defaultHeight: CGFloat = 680
+
+    static func initialFrame(in visibleFrame: CGRect) -> CGRect {
+        if let savedValue = UserDefaults.standard.string(forKey: defaultsKey) {
+            let savedFrame = NSRectFromString(savedValue)
+            if savedFrame.width > 0, savedFrame.height > 0 {
+                return StickyWindowGeometry.runtimeFrame(savedFrame, visibleFrame: visibleFrame)
+            }
+        }
+
+        let size = CGSize(
+            width: 420,
+            height: min(defaultHeight, visibleFrame.height - 80)
+        )
+        return StickyWindowGeometry.runtimeFrame(
+            CGRect(
+                x: visibleFrame.midX - size.width / 2,
+                y: visibleFrame.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            ),
+            visibleFrame: visibleFrame
+        )
+    }
+
+    static func save(_ frame: CGRect) {
+        UserDefaults.standard.set(NSStringFromRect(frame), forKey: defaultsKey)
+    }
+}
+
 private enum DailyDigestExclusions {
     private static let defaultsKey = "today.dailyDigestExclusions"
     private static let dayKey = "today.dailyDigestExclusionsDay"
@@ -166,16 +198,7 @@ private final class DailyDigestProjection {
         self.sectionTitles = Dictionary(uniqueKeysWithValues: selection.sections.map { ($0.id, $0.title) })
         self.sectionOrder = selection.sections.map(\.id)
         let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
-        let size = NSSize(
-            width: 420,
-            height: max(StickyWindowGeometry.minimumHeight, visible.height - 80)
-        )
-        let frame = NSRect(
-            x: visible.midX - size.width / 2,
-            y: visible.minY + 40,
-            width: size.width,
-            height: size.height
-        )
+        let frame = DailyDigestWindowGeometry.initialFrame(in: visible)
         model = StickyModel(data: StickyData(
             id: UUID(),
             title: Self.titleFormatter.string(from: Date()),
@@ -331,6 +354,9 @@ final class DailyDigestWindowController {
         stickyController.completionReportingController = { [weak projection] itemID in
             projection?.sourceController(for: itemID)
         }
+        stickyController.onFrameChange = { frame in
+            DailyDigestWindowGeometry.save(frame)
+        }
         stickyController.closeOverride = { [weak stickyController] in
             stickyController?.panel.orderOut(nil)
         }
@@ -341,19 +367,7 @@ final class DailyDigestWindowController {
 
     func present() {
         refreshDay()
-        applyTallPresentationFrame()
         NSApp.activate(ignoringOtherApps: true)
         stickyController.focusForTyping()
-    }
-
-    private func applyTallPresentationFrame() {
-        guard let screen = stickyController.panel.screen ?? NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        var frame = stickyController.panel.frame
-        frame.size.height = max(StickyWindowGeometry.minimumHeight, visible.height - 80)
-        frame.origin.y = visible.minY + 40
-        frame = StickyWindowGeometry.runtimeFrame(frame, visibleFrame: visible)
-        stickyController.model.frame = frame
-        stickyController.panel.setFrame(frame, display: true)
     }
 }

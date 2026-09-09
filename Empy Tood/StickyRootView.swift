@@ -703,6 +703,7 @@ struct StickyRootView: View {
     @FocusState private var dailyNoteFocused: Bool
     @FocusState private var focusedSectionID: UUID?
     @State private var hovering = false
+    @State private var bottomToolbarHovered = false
     @State private var hoveringTopChrome = false
     @State private var showColors = false
     @State private var timerReturnFocus: TimerReturnFocus?
@@ -727,7 +728,6 @@ struct StickyRootView: View {
     @State private var collapsedSectionIDs: Set<UUID> = []
     @State private var addRowHovered = false
     @State private var removeRowHovered = false
-    @State private var dailyDigestControlsNearby = false
     @State private var showingTaskPicker = false
     @State private var taskPickerMode: StickyTaskPickerMode = .add
     @State private var taskPickerQuery = ""
@@ -753,10 +753,12 @@ struct StickyRootView: View {
     @State private var availableWidth: CGFloat
     @State private var availableHeight: CGFloat
 
-    private let corner: CGFloat = 4
+    // Home cards render at roughly half the floating sticky's scale, so twice
+    // their numeric radius produces the same visible corner curvature here.
+    private let corner: CGFloat = DeskCardMetrics.cornerRadius * 2
     private let contentInset: CGFloat = 24
     private var layoutInset: CGFloat { taskPicker == nil ? contentInset : contentInset + 6 }
-    private var color: StickyColor { model.color }
+    private var color: StickyRenderedColor { model.renderedColor }
     private var paperColor: Color { model.paperColor }
     private var completionAnimationsEnabled: Bool {
         AppSettings.shared.completionAnimationsEnabled
@@ -1458,14 +1460,8 @@ struct StickyRootView: View {
                 .onHover { removeRowHovered = $0 }
                 .disabled(model.items.isEmpty)
             }
-            .opacity(dailyDigestControlsNearby ? 1 : 0)
-            .background {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .padding(-50)
-                    .onHover { dailyDigestControlsNearby = $0 }
-            }
-            .animation(HoverMotion.feedback, value: dailyDigestControlsNearby)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+            .contentShape(Rectangle())
         }
     }
 
@@ -1486,11 +1482,11 @@ struct StickyRootView: View {
             }
             .foregroundStyle(color.ink.opacity(inkOpacity))
             .padding(.horizontal, 10)
-            .padding(.vertical, 3)
+            .frame(minHeight: 30)
             .background(
                 Capsule().fill(color.ink.opacity(isHovered ? 0.09 : 0.055))
             )
-            .contentShape(Rectangle())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .animation(HoverMotion.feedback, value: isHovered)
@@ -2215,19 +2211,20 @@ struct StickyRootView: View {
 
     private var colorPicker: some View {
         VStack(spacing: 12) {
+            if showsCustomColorPicker {
+                StickyCustomColorPicker(
+                    color: paperColor,
+                    onColorChange: { model.setCustomColor($0) }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                Divider()
+            }
+
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(22)), count: 5), spacing: 10) {
                 ForEach(StickyColor.allCases.dropLast()) { c in
                     colorSwatchButton(c)
                 }
                 customColorPickerButton
-            }
-
-            if showsCustomColorPicker {
-                Divider()
-                StickyCustomColorPicker(color: paperColor) { selectedColor in
-                    model.setCustomColor(selectedColor)
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
             }
         }
         .padding(12)
@@ -2348,11 +2345,15 @@ struct StickyRootView: View {
 
                 if taskPicker != nil {
                     Button { AppSettings.shared.showsSpotifyPlayer.toggle() } label: {
-                        if spotifyPlayer.isPlaying {
-                            MusicEqualizerIcon(color: color.ink.opacity(0.68))
-                        } else {
-                            Image(systemName: "music.note")
+                        Group {
+                            if spotifyPlayer.isPlaying {
+                                MusicEqualizerIcon(color: color.ink.opacity(0.68))
+                            } else {
+                                Image(systemName: "music.note")
+                            }
                         }
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                     }
                     .opacity(showsSpotifyPlayer ? 1 : 0.55)
                     .hoverFeedback(scale: 1.1, darkening: -0.05)
@@ -2405,13 +2406,12 @@ struct StickyRootView: View {
             .buttonStyle(.plain)
             .padding(.vertical, 8)
             .padding(.horizontal, 14)
-            .background(
-                Capsule().fill(paperColor.opacity(0.6))
-            )
             .padding(.bottom, 16)
-            .opacity(hovering ? 1 : 0)
-            .allowsHitTesting(hovering)
-            .animation(.easeInOut(duration: 0.15), value: hovering)
+            .contentShape(Rectangle())
+            .onHover { bottomToolbarHovered = $0 }
+            .opacity(hovering || bottomToolbarHovered ? 1 : 0)
+            .allowsHitTesting(true)
+            .animation(.easeInOut(duration: 0.15), value: hovering || bottomToolbarHovered)
         }
     }
 

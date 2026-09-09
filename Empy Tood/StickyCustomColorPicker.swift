@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct StickyCustomColorPicker: View {
-    private let onChange: (Color) -> Void
+    private let onColorChange: (Color) -> Void
 
     @State private var hue: CGFloat
     @State private var saturation: CGFloat
@@ -11,8 +11,11 @@ struct StickyCustomColorPicker: View {
     @State private var hexText: String
     @State private var opacityText: String
 
-    init(color: Color, onChange: @escaping (Color) -> Void) {
-        self.onChange = onChange
+    init(
+        color: Color,
+        onColorChange: @escaping (Color) -> Void
+    ) {
+        self.onColorChange = onColorChange
         let components = Self.components(from: color)
         _hue = State(initialValue: components.hue)
         _saturation = State(initialValue: components.saturation)
@@ -33,7 +36,7 @@ struct StickyCustomColorPicker: View {
     var body: some View {
         VStack(spacing: 12) {
             saturationBrightnessField
-                .frame(width: 220, height: 148)
+                .frame(width: 172, height: 120)
 
             HStack(spacing: 10) {
                 eyedropperButton
@@ -68,7 +71,7 @@ struct StickyCustomColorPicker: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 220)
+        .frame(width: 172)
     }
 
     private var saturationBrightnessField: some View {
@@ -164,9 +167,12 @@ struct StickyCustomColorPicker: View {
                 apply(sampledColor)
             }
         } label: {
-            Image(systemName: "eyedropper")
-                .font(.system(size: 15, weight: .medium))
-                .frame(width: 26, height: 46)
+            Image("PhosphorEyedropper")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 17, height: 17)
+                .frame(width: 20, height: 58)
         }
         .buttonStyle(.plain)
         .help("Pick a colour from the screen")
@@ -191,7 +197,7 @@ struct StickyCustomColorPicker: View {
     private func emitChange() {
         hexText = Self.hex(red: selectedColor)
         opacityText = String(Int((opacity * 100).rounded()))
-        onChange(selectedColor)
+        onColorChange(selectedColor)
     }
 
     private func applyHexText() {
