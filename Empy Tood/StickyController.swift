@@ -47,6 +47,7 @@ final class StickyController: NSObject, NSWindowDelegate {
     var closeOverride: (() -> Void)?
     var archiveOverride: (() -> Void)?
     var completionReportingController: ((UUID) -> StickyController?)?
+    var onFrameChange: ((CGRect) -> Void)?
     private var frameBeforeExpansion: NSRect?
     private var isRepairingFrame = false
 
@@ -904,7 +905,10 @@ final class StickyController: NSObject, NSWindowDelegate {
 
     private func syncFrame(persist: Bool) {
         model.frame = panel.frame
-        if persist { manager?.scheduleSave() }
+        if persist {
+            onFrameChange?(model.frame)
+            manager?.scheduleSave()
+        }
     }
 }
 
