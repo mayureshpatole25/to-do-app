@@ -677,6 +677,7 @@ struct StickyTaskPickerItem: Identifiable {
 
 struct StickyTaskPickerConfiguration {
     var sectionsChanged: (([StickyChecklistSection]) -> Void)? = nil
+    var didCreate: ((StickyTaskPickerItem, UUID, Bool) -> Void)? = nil
     let candidates: () -> [StickyTaskPickerItem]
     let didAdd: (StickyTaskPickerItem) -> Void
     let didRemove: (StickyTaskPickerItem) -> Void
@@ -829,6 +830,7 @@ struct StickyRootView: View {
             }
             model.onSplitItem = { id, caret in
                 if let newID = model.splitItem(id, atUTF16Offset: caret) {
+                    registerCreatedTask(newID, beside: id)
                     focusItem(newID, atUTF16Offset: 0)
                 }
             }
@@ -2378,7 +2380,22 @@ struct StickyRootView: View {
     private func submit(_ item: TodoItem) {
         guard !isBlank(bindingValue(item)) else { return }
         let newID = model.addItem(after: item)
+        registerCreatedTask(newID, beside: item.id)
         focusItem(newID, atUTF16Offset: 0)
+    }
+
+    private func registerCreatedTask(_ id: UUID, beside neighborID: UUID) {
+        guard let index = checklistSections?.firstIndex(where: { $0.itemIDs.contains(neighborID) }),
+              let section = checklistSections?[index],
+              let item = model.items.first(where: { $0.id == id }),
+              let itemIndex = model.items.firstIndex(where: { $0.id == id }),
+              let neighborIndex = model.items.firstIndex(where: { $0.id == neighborID }) else { return }
+        let membership = Set(section.itemIDs + [id])
+        checklistSections?[index] = StickyChecklistSection(id: section.id, title: section.title,
+            itemIDs: model.items.filter { membership.contains($0.id) }.map(\.id))
+        taskPicker?.didCreate?(StickyTaskPickerItem(id: id, item: item, stickyID: section.id,
+            stickyTitle: section.title), neighborID, itemIndex < neighborIndex)
+        model.onChange?()
     }
 
     /// Crosses title/item boundaries after AppKit has exhausted the wrapped
