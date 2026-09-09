@@ -241,6 +241,14 @@ private final class DailyDigestProjection {
         DailyDigestExclusions.include(candidate.id)
     }
 
+    func registerCreatedTask(_ candidate: StickyTaskPickerItem, beside neighborID: UUID, before: Bool) {
+        guard let source = manager.controllers[candidate.stickyID]?.model,
+              let index = source.items.firstIndex(where: { $0.id == neighborID }) else { return }
+        registerAddedTask(candidate)
+        source.items.insert(candidate.item, at: before ? index : index + 1)
+        source.onChange?()
+    }
+
     func registerRemovedTask(_ candidate: StickyTaskPickerItem) {
         DailyDigestExclusions.exclude(candidate.id)
     }
@@ -298,6 +306,9 @@ final class DailyDigestWindowController {
         self.projection = projection
         let taskPicker = StickyTaskPickerConfiguration(
             sectionsChanged: { [weak projection] sections in projection?.updateSections(sections) },
+            didCreate: { [weak projection] candidate, neighborID, before in
+                projection?.registerCreatedTask(candidate, beside: neighborID, before: before)
+            },
             candidates: { [weak projection] in projection?.pickerCandidates() ?? [] },
             didAdd: { [weak projection] candidate in projection?.registerAddedTask(candidate) },
             didRemove: { [weak projection] candidate in projection?.registerRemovedTask(candidate) }
