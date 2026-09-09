@@ -992,7 +992,6 @@ struct StickyRootView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Spacer().frame(height: 26)
             checklist
             if taskPicker != nil {
                 SpotifyMiniPlayer(
@@ -1011,7 +1010,7 @@ struct StickyRootView: View {
         // the chrome and content independently preserves this gap while the
         // shared horizontal inset keeps every left/right edge aligned.
         .padding(.top, 48)
-        .padding(.bottom, taskPicker == nil ? 64 : 88)
+        .padding(.bottom, taskPicker == nil ? 64 : 76)
     }
 
     private var header: some View {
@@ -1076,10 +1075,6 @@ struct StickyRootView: View {
                 // preventing the native window from becoming narrower again.
                 .frame(minWidth: 0, maxWidth: titleWidth, alignment: .topLeading)
 
-            if taskPicker != nil {
-                dailyDigestControls
-                    .padding(.top, 14)
-            }
         }
         .overlay(alignment: .topTrailing) {
             StickyTimerControl(
@@ -1184,13 +1179,21 @@ struct StickyRootView: View {
 
     // MARK: - Checklist
 
-    /// Uses whatever vertical room the resized sticky leaves below the
-    /// header. Every item remains available; overflow scrolls inside this
-    /// area instead of being replaced by "N more" / "Show less".
+    /// Uses whatever vertical room the resized sticky leaves between the
+    /// fixed title and bottom controls. The Today controls, sections, and
+    /// items travel together in one continuous scroll region.
     private var checklist: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if taskPicker != nil {
+                        dailyDigestControls
+                            .padding(.top, 14)
+                        Spacer().frame(height: 26)
+                    } else {
+                        Spacer().frame(height: 26)
+                    }
+
                     if let checklistSections {
                         ForEach(Array(checklistSections.enumerated()), id: \.element.id) { index, section in
                             checklistSection(section, addsTopSpacing: index > 0)
@@ -1237,6 +1240,18 @@ struct StickyRootView: View {
         }
         .frame(maxHeight: .infinity)
         .padding(.leading, -layoutInset)
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.045),
+                    .init(color: .black, location: 0.955),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
     }
 
     private func checklistSection(
