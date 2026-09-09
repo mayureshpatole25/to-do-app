@@ -24,11 +24,14 @@ final class StickyController: NSObject, NSWindowDelegate {
 
     private enum PendingCaretTarget: Equatable {
         case title
+        case dailyNote
         case item(UUID)
 
         @MainActor
         func matches(_ model: StickyModel) -> Bool {
             switch self {
+            case .dailyNote:
+                return model.isDailyNoteEditing
             case .title:
                 return model.isTitleFocused
             case .item(let id):
@@ -367,7 +370,20 @@ final class StickyController: NSObject, NSWindowDelegate {
 
                 self.applySelectionStyle(to: editor)
 
-                if let normalized = self.model.onNormalizeDateTokenSelection?(editor.selectedRange()),
+                // The daily digest note must never display AppKit's automatic
+                // full-field selection. Collapse any select-all state before
+                // the editor gets a chance to draw it.
+                if self.model.isDailyNoteEditing {
+                    let selection = editor.selectedRange()
+                    let textLength = (editor.string as NSString).length
+                    if textLength > 0, selection.location == 0, selection.length == textLength {
+                        editor.setSelectedRange(NSRange(location: textLength, length: 0))
+                        return
+                    }
+                }
+
+                if !self.model.isDailyNoteEditing, !self.model.isSectionEditing,
+                   let normalized = self.model.onNormalizeDateTokenSelection?(editor.selectedRange()),
                    normalized != editor.selectedRange() {
                     editor.setSelectedRange(normalized)
                     return
@@ -397,6 +413,10 @@ final class StickyController: NSObject, NSWindowDelegate {
     /// caret at the semantic join/split point before it is drawn.
     func placeCaretOnNextTitleFocus(atUTF16Offset offset: Int) {
         prepareCaretPlacement(.offset(offset), for: .title)
+    }
+
+    func placeCaretOnNextDailyNoteFocus(atUTF16Offset offset: Int) {
+        prepareCaretPlacement(.offset(offset), for: .dailyNote)
     }
 
     func placeCaretOnNextItemFocus(_ id: UUID, atUTF16Offset offset: Int) {
@@ -516,7 +536,7 @@ final class StickyController: NSObject, NSWindowDelegate {
     /// macOS's neutral grey/accent highlight. Blending toward black preserves
     /// the paper's hue; alpha keeps the selected text comfortably readable.
     private func applySelectionStyle(to editor: NSTextView) {
-        let paper = NSColor(model.color.paper)
+        let paper = NSColor(model.paperColor)
         let darkerPaper = paper.blended(withFraction: 0.30, of: .black) ?? paper
         let background = darkerPaper.withAlphaComponent(0.50)
         var attributes = editor.selectedTextAttributes

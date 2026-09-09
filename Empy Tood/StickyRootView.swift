@@ -727,6 +727,7 @@ struct StickyRootView: View {
     @State private var collapsedSectionIDs: Set<UUID> = []
     @State private var addRowHovered = false
     @State private var removeRowHovered = false
+    @State private var dailyDigestControlsNearby = false
     @State private var showingTaskPicker = false
     @State private var taskPickerMode: StickyTaskPickerMode = .add
     @State private var taskPickerQuery = ""
@@ -737,6 +738,8 @@ struct StickyRootView: View {
     @State private var suppressCheckboxToggleID: UUID?
     @State private var dateDraft: TaskDateDraft?
     @State private var highlightedDateSuggestion = 0
+    @StateObject private var spotifyPlayer = SpotifyPlaybackController()
+    @State private var showsCustomColorPicker = false
     /// The window's current width — the title needs it (see `header`) without a local
     /// `GeometryReader` forcing a fixed height on it. A previous version
     /// used a `titleWraps` heuristic (does the whole title fit on one line?)
@@ -752,7 +755,9 @@ struct StickyRootView: View {
 
     private let corner: CGFloat = 4
     private let contentInset: CGFloat = 24
+    private var layoutInset: CGFloat { taskPicker == nil ? contentInset : contentInset + 6 }
     private var color: StickyColor { model.color }
+    private var paperColor: Color { model.paperColor }
     private var completionAnimationsEnabled: Bool {
         AppSettings.shared.completionAnimationsEnabled
     }
@@ -761,6 +766,9 @@ struct StickyRootView: View {
     }
     private var showsDoneTasks: Bool {
         AppSettings.shared.showsDoneTasks
+    }
+    private var showsSpotifyPlayer: Bool {
+        AppSettings.shared.showsSpotifyPlayer
     }
 
     init(
@@ -823,6 +831,9 @@ struct StickyRootView: View {
         }
         .onAppear {
             reduceMotionEnabled = accessibilityReduceMotion
+            if taskPicker != nil {
+                spotifyPlayer.start()
+            }
             focusedID = nil
             model.focusedItemID = focusedID
             model.onSplitTitle = { caret in
@@ -848,11 +859,11 @@ struct StickyRootView: View {
                 }
             }
             model.onRequestLastItemFocus = {
-                if taskPicker != nil {
-                    dailyNoteFocused = true
-                } else {
-                    focusLastItemForTyping()
-                }
+                // Daily digest windows stay neutral when they become key or
+                // their background is clicked. Editing begins only through a
+                // direct field click or explicit keyboard navigation.
+                guard taskPicker == nil else { return }
+                focusLastItemForTyping()
             }
             model.onHandleSectionKey = { key, modifiers in
                 guard let id = focusedSectionID else { return false }
@@ -904,12 +915,19 @@ struct StickyRootView: View {
                 prepareDoneTransition(id: id, isDone: isDone)
             }
             if taskPicker != nil {
-                DispatchQueue.main.async { dailyNoteFocused = true }
+                // The Today note opens neutrally. Automatically focusing this
+                // multiline field while AppKit establishes the window can
+                // visibly select its entire contents before caret correction.
+                dailyNoteFocused = false
+                model.isDailyNoteEditing = false
             } else {
                 focusLastItemForTyping()
             }
         }
         .onDisappear {
+            if taskPicker != nil {
+                spotifyPlayer.stop()
+            }
             model.onHandleSectionKey = nil
             model.onNavigateTextField = nil
             model.isSectionEditing = false
@@ -958,7 +976,7 @@ struct StickyRootView: View {
     private var paperBackground: some View {
         ZStack {
             RoundedRectangle(cornerRadius: corner, style: .continuous)
-                .fill(color.paper)
+                .fill(paperColor)
             GrainOverlay()
                 .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         }
@@ -974,34 +992,41 @@ struct StickyRootView: View {
             header
             Spacer().frame(height: 26)
             checklist
+            if taskPicker != nil {
+                SpotifyMiniPlayer(
+                    player: spotifyPlayer,
+                    isPresented: showsSpotifyPlayer,
+                    ink: color.ink,
+                    paper: paperColor,
+                    font: bodyFont
+                )
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
-        .padding(.horizontal, contentInset)
+        .padding(.horizontal, layoutInset)
         // Leaves a calm, deliberate gap below the traffic lights instead
         // of letting the date compete with the window controls. Moving the
         // the chrome and content independently preserves this gap while the
         // shared horizontal inset keeps every left/right edge aligned.
         .padding(.top, 48)
-        .padding(.bottom, 64) // clears the bottom hover toolbar, which now sits flush against the window edge
+        .padding(.bottom, taskPicker == nil ? 64 : 88)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The date sits on its own line above the title now — it used
-            // to share the title's row (reserving a fixed slot beside it),
-            // which ate into the title's width and made longer titles wrap
-            // mid-word or get cut off. Up here it costs a line of height
-            // instead, and the title gets the sticky's full width.
+            // Ordinary stickies keep their date above the title. The Today
+            // digest uses that space for its focused content instead.
             if let celebration = model.achievementNotice.celebration {
                 AchievementNotice(celebration: celebration,
                     close: { controller.dismissAchievementNotice() },
                     open: { controller.openAchievements() })
-            } else {
-            HStack(alignment: .center, spacing: 12) {
-                Text(Self.dateFormatter.string(from: model.day))
-                    .font(bodyFont(14))
-                    .foregroundStyle(color.ink.opacity(0.3))
-                Spacer(minLength: 8)
-            }
+            } else if taskPicker == nil {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(Self.dateFormatter.string(from: model.day))
+                        .font(bodyFont(14))
+                        .foregroundStyle(color.ink.opacity(0.3))
+                    Spacer(minLength: 8)
+                }
             }
 
             // Gives the title an explicit maximum width budget — an
@@ -1017,7 +1042,7 @@ struct StickyRootView: View {
             // Leaving height alone lets the TextField report however tall
             // it genuinely needs to be, which is the only way to guarantee
             // that never happens again.
-            let titleWidth = max(availableWidth - (contentInset * 2), 80)
+            let titleWidth = max(availableWidth - (layoutInset * 2), 80)
             let titleSize = Self.titleFontSize(
                 for: model.title, baseSize: AppSettings.shared.titleSize.baseSize, availableWidth: titleWidth
             )
@@ -1065,7 +1090,7 @@ struct StickyRootView: View {
                 restoreAfterEditing: restoreFocusAfterTimerEdit
             )
             .frame(
-                width: max(140, (availableWidth - contentInset * 2) * 0.42),
+                width: max(140, (availableWidth - layoutInset * 2) * 0.42),
                 height: 112,
                 alignment: .topTrailing
             )
@@ -1179,7 +1204,7 @@ struct StickyRootView: View {
                 // The checklist's content stays aligned at its original x,
                 // while its scroll viewport reaches into the paper inset so
                 // left-flying completion particles are not clipped.
-                .padding(.leading, contentInset)
+                .padding(.leading, layoutInset)
             }
             .coordinateSpace(name: "checklist")
             .onPreferenceChange(ChecklistRowFramePreferenceKey.self) { frames in
@@ -1209,7 +1234,7 @@ struct StickyRootView: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .padding(.leading, -contentInset)
+        .padding(.leading, -layoutInset)
     }
 
     private func checklistSection(
@@ -1249,10 +1274,22 @@ struct StickyRootView: View {
             .frame(minHeight: 34)
 
             if !isCollapsed {
-                ForEach(items) { item in row(item).id(item.id) }
+                Rectangle()
+                    .fill(color.divider)
+                    .frame(height: 1)
+                    .padding(.leading, 22)
+
+                ForEach(items) { item in
+                    row(item)
+                        // Align the grouped task checkbox and divider with
+                        // the sticky name after its 14pt disclosure control
+                        // and 8pt gap.
+                        .padding(.leading, 22)
+                        .id(item.id)
+                }
             }
         }
-        .padding(.top, addsTopSpacing ? 18 : 0)
+        .padding(.top, addsTopSpacing ? 30 : 0)
         .offset(y: draggingSectionID == section.id
             ? sectionDragY + sectionDragOriginY - (rowFrames[section.id]?.minY ?? sectionDragOriginY) : 0)
         .background(GeometryReader { proxy in
@@ -1309,7 +1346,7 @@ struct StickyRootView: View {
         if direction < 0 {
             guard index > 0 else {
                 focusedSectionID = nil
-                dailyNoteFocused = true
+                focusDailyNote()
                 return
             }
             let previous = sections[index - 1]
@@ -1421,6 +1458,14 @@ struct StickyRootView: View {
                 .onHover { removeRowHovered = $0 }
                 .disabled(model.items.isEmpty)
             }
+            .opacity(dailyDigestControlsNearby ? 1 : 0)
+            .background {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .padding(-50)
+                    .onHover { dailyDigestControlsNearby = $0 }
+            }
+            .animation(HoverMotion.feedback, value: dailyDigestControlsNearby)
         }
     }
 
@@ -1440,6 +1485,11 @@ struct StickyRootView: View {
                     .font(bodyFont(14))
             }
             .foregroundStyle(color.ink.opacity(inkOpacity))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(color.ink.opacity(isHovered ? 0.09 : 0.055))
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1546,7 +1596,7 @@ struct StickyRootView: View {
             .frame(maxHeight: 290)
         }
         .frame(width: 330)
-        .background(color.paper)
+        .background(paperColor)
         .onKeyPress(.downArrow) { moveTaskPickerHighlight(by: 1); return .handled }
         .onKeyPress(.upArrow) { moveTaskPickerHighlight(by: -1); return .handled }
         .onKeyPress(.return) {
@@ -1569,7 +1619,7 @@ struct StickyRootView: View {
                         .stroke(color.ink.opacity(0.15), lineWidth: 1)
                 }
                 .shadow(color: .black.opacity(0.2), radius: 18, y: 8)
-                .padding(.horizontal, contentInset)
+                .padding(.horizontal, layoutInset)
                 .padding(.bottom, 54)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1833,7 +1883,7 @@ struct StickyRootView: View {
                 }
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(color.paper)
+                    .foregroundStyle(paperColor)
                     .opacity(item.isDone ? 1 : 0)
                     .scaleEffect(
                         accessibilityReduceMotion || !completionAnimationsEnabled || item.isDone
@@ -1854,7 +1904,7 @@ struct StickyRootView: View {
             .overlay {
                 CompletionParticleBurst(
                     isChecked: item.isDone,
-                    paperColor: color.paper,
+                    paperColor: paperColor,
                     inkColor: color.ink,
                     animationsEnabled: completionAnimationsEnabled
                 )
@@ -2042,7 +2092,7 @@ struct StickyRootView: View {
         }
         .padding(8)
         .frame(width: 210)
-        .background(color.paper)
+        .background(paperColor)
     }
 
     private func finishReordering() {
@@ -2164,12 +2214,56 @@ struct StickyRootView: View {
     // MARK: - Color picker
 
     private var colorPicker: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.fixed(22)), count: 5), spacing: 10) {
-            ForEach(StickyColor.allCases) { c in
-                colorSwatchButton(c)
+        VStack(spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(22)), count: 5), spacing: 10) {
+                ForEach(StickyColor.allCases.dropLast()) { c in
+                    colorSwatchButton(c)
+                }
+                customColorPickerButton
+            }
+
+            if showsCustomColorPicker {
+                Divider()
+                StickyCustomColorPicker(color: paperColor) { selectedColor in
+                    model.setCustomColor(selectedColor)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
             }
         }
         .padding(12)
+    }
+
+    private var customColorPickerButton: some View {
+        Button {
+            if accessibilityReduceMotion {
+                showsCustomColorPicker.toggle()
+            } else {
+                withAnimation(.timingCurve(0.23, 1, 0.32, 1, duration: 0.18)) {
+                    showsCustomColorPicker.toggle()
+                }
+            }
+        } label: {
+            Circle()
+                .fill(
+                    AngularGradient(
+                        colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
+                        center: .center
+                    )
+                )
+                .overlay(
+                    Circle()
+                        .fill(RadialGradient(colors: [.white, .white.opacity(0)], center: .center, startRadius: 0, endRadius: 11))
+                )
+                .overlay(Circle().stroke(.black.opacity(0.15), lineWidth: 1))
+                .overlay(
+                    Circle().stroke(color.ink, lineWidth: model.customColorHex == nil ? 0 : 2)
+                        .padding(-3)
+                )
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .help("Custom colour")
+        .accessibilityLabel("Custom colour")
     }
 
     private func colorSwatchButton(_ c: StickyColor) -> some View {
@@ -2252,6 +2346,20 @@ struct StickyRootView: View {
                 .accessibilityLabel(showsTimer ? "Hide timer" : "Show timer")
                 .help(showsTimer ? "Hide timer" : "Show timer")
 
+                if taskPicker != nil {
+                    Button { AppSettings.shared.showsSpotifyPlayer.toggle() } label: {
+                        if spotifyPlayer.isPlaying {
+                            MusicEqualizerIcon(color: color.ink.opacity(0.68))
+                        } else {
+                            Image(systemName: "music.note")
+                        }
+                    }
+                    .opacity(showsSpotifyPlayer ? 1 : 0.55)
+                    .hoverFeedback(scale: 1.1, darkening: -0.05)
+                    .accessibilityLabel(showsSpotifyPlayer ? "Hide music player" : "Show music player")
+                    .help(showsSpotifyPlayer ? "Hide music player" : "Show music player")
+                }
+
                 HStack(spacing: 4) {
                     Button { model.togglePriorityVisibility() } label: {
                         Image(model.showsPriorities ? "CellSignalFull" : "CellSignalNone")
@@ -2298,7 +2406,7 @@ struct StickyRootView: View {
             .padding(.vertical, 8)
             .padding(.horizontal, 14)
             .background(
-                Capsule().fill(color.paper.opacity(0.6))
+                Capsule().fill(paperColor.opacity(0.6))
             )
             .padding(.bottom, 16)
             .opacity(hovering ? 1 : 0)
@@ -2365,7 +2473,7 @@ struct StickyRootView: View {
             let destination = fields[next]
             DispatchQueue.main.async {
                 if case .section(let id) = destination { focusedSectionID = id }
-                else { dailyNoteFocused = true }
+                else { focusDailyNote(at: direction < 0 ? (model.dailyNote as NSString).length : 0) }
                 DispatchQueue.main.async {
                     guard let editor = controller.panel.firstResponder as? NSTextView else { return }
                     let offset = direction < 0 ? (editor.string as NSString).length : 0
@@ -2382,6 +2490,21 @@ struct StickyRootView: View {
         let newID = model.addItem(after: item)
         registerCreatedTask(newID, beside: item.id)
         focusItem(newID, atUTF16Offset: 0)
+    }
+
+    private func focusDailyNote(at offset: Int? = nil) {
+        // An already active note keeps its intentional caret or selection.
+        guard !dailyNoteFocused else { return }
+        focusedID = nil
+        focusedSectionID = nil
+        titleFocused = false
+        model.focusedItemID = nil
+        model.isTitleFocused = false
+        model.isDailyNoteEditing = true
+        controller.placeCaretOnNextDailyNoteFocus(
+            atUTF16Offset: offset ?? (model.dailyNote as NSString).length
+        )
+        dailyNoteFocused = true
     }
 
     private func registerCreatedTask(_ id: UUID, beside neighborID: UUID) {

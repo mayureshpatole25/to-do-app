@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftUI
 
 /// Plain `Codable` snapshot written to disk. Kept separate from the runtime
 /// `@Observable` model because the Observation macro doesn't encode cleanly.
@@ -19,6 +20,9 @@ struct StickyData: Codable, Identifiable {
     var day: Date
     var items: [TodoItem]
     var colorID: StickyColor
+    /// Optional sRGB override chosen from the native custom-colour picker.
+    /// Older saves omit this key and continue using `colorID` unchanged.
+    var customColorHex: String? = nil
     var fontID: StickyFont
     var frame: CGRect
     var isVisible: Bool
@@ -37,6 +41,7 @@ final class StickyModel: Identifiable {
     var day: Date
     var items: [TodoItem]
     var colorID: StickyColor
+    var customColorHex: String?
     var fontID: StickyFont
     var frame: CGRect
     var isVisible: Bool
@@ -123,6 +128,7 @@ final class StickyModel: Identifiable {
             return item
         }
         self.colorID = data.colorID
+        self.customColorHex = data.customColorHex
         self.fontID = data.fontID
         // Persisted window geometry is untrusted input. AppKit can construct a
         // 0×0 window from negative dimensions and can throw while constructing
@@ -142,11 +148,14 @@ final class StickyModel: Identifiable {
     }
 
     var color: StickyColor { colorID }
+    var paperColor: Color {
+        customColorHex.flatMap(Color.init(stickyHex:)) ?? colorID.paper
+    }
     var font: StickyFont { fontID }
 
     func snapshot() -> StickyData {
         StickyData(id: id, title: title, emoji: nil, day: day, items: items,
-                   colorID: colorID, fontID: fontID,
+                   colorID: colorID, customColorHex: customColorHex, fontID: fontID,
                    frame: StickyWindowGeometry.runtimeFrame(frame),
                    isVisible: isVisible, showsPriorities: showsPriorities)
     }
@@ -368,7 +377,17 @@ final class StickyModel: Identifiable {
     }
 
 
-    func setColor(_ c: StickyColor) { colorID = c; onChange?() }
+    func setColor(_ c: StickyColor) {
+        colorID = c
+        customColorHex = nil
+        onChange?()
+    }
+
+    func setCustomColor(_ color: Color) {
+        guard let hex = color.stickyHexValue else { return }
+        customColorHex = hex
+        onChange?()
+    }
     func setFont(_ f: StickyFont) { fontID = f; onChange?() }
     func setTitle(_ t: String) { title = t; onChange?() }
 
@@ -392,5 +411,32 @@ final class StickyModel: Identifiable {
             showsPriorities: false
         )
         return StickyModel(data: data)
+    }
+}
+
+private extension Color {
+    init?(stickyHex: String) {
+        let value = stickyHex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard [6, 8].contains(value.count), let rgba = UInt32(value, radix: 16) else { return nil }
+        let rgb = value.count == 8 ? rgba >> 8 : rgba
+        let alpha = value.count == 8 ? Double(rgba & 0xFF) / 255 : 1
+        self.init(
+            .sRGB,
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255,
+            opacity: alpha
+        )
+    }
+
+    var stickyHexValue: String? {
+        guard let rgb = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        let red = Int((rgb.redComponent * 255).rounded())
+        let green = Int((rgb.greenComponent * 255).rounded())
+        let blue = Int((rgb.blueComponent * 255).rounded())
+        let alpha = Int((rgb.alphaComponent * 255).rounded())
+        return alpha == 255
+            ? String(format: "%02X%02X%02X", red, green, blue)
+            : String(format: "%02X%02X%02X%02X", red, green, blue, alpha)
     }
 }

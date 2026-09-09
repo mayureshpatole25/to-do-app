@@ -52,6 +52,11 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(showsDoneTasks, forKey: Keys.showsDoneTasks) }
     }
 
+    /// Shared visibility for the compact player on the Today sticky.
+    var showsSpotifyPlayer: Bool {
+        didSet { UserDefaults.standard.set(showsSpotifyPlayer, forKey: Keys.showsSpotifyPlayer) }
+    }
+
     /// Starting duration for every newly opened sticky timer. Individual
     /// timers remain intentionally ephemeral and reset to this value when
     /// their sticky closes.
@@ -116,6 +121,7 @@ final class AppSettings {
         completionAnimationsEnabled = d.object(forKey: Keys.completionAnimationsEnabled) as? Bool ?? true
         showsStickyTimers = d.object(forKey: Keys.showsStickyTimers) as? Bool ?? false
         showsDoneTasks = d.object(forKey: Keys.showsDoneTasks) as? Bool ?? false
+        showsSpotifyPlayer = d.object(forKey: Keys.showsSpotifyPlayer) as? Bool ?? true
         defaultTimerSeconds = min(max(d.object(forKey: Keys.defaultTimerSeconds) as? Int ?? 300, 1), 359_999)
         timerCompletionSound = d.string(forKey: Keys.timerCompletionSound)
             .flatMap(TimerCompletionSound.init(rawValue:)) ?? .glass
@@ -135,6 +141,7 @@ final class AppSettings {
         static let completionAnimationsEnabled = "today.completionAnimationsEnabled"
         static let showsStickyTimers = "today.showsStickyTimers"
         static let showsDoneTasks = "today.showsDoneTasks"
+        static let showsSpotifyPlayer = "today.showsSpotifyPlayer"
         static let defaultTimerSeconds = "today.defaultTimerSeconds"
         static let timerCompletionSound = "today.timerCompletionSound"
         static let showShortcut = "today.showStickyShortcut"
