@@ -26,6 +26,8 @@
 	<string></string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Empy Tood uses your location to add an optional location stamp to journal entries. This is never sent anywhere and stays on your Mac.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Empy Tood uses Spotify controls to show and control your current music from the Today sticky.</string>
 	<key>NSMainNibFile</key>
 	<string></string>
 </dict>

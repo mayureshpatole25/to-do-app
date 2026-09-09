@@ -550,7 +550,7 @@ struct StickyDeskCard: View {
                                         .frame(width: 11, height: 11)
                                     Image(systemName: "checkmark")
                                         .font(.system(size: 7, weight: .bold))
-                                        .foregroundStyle(model.color.paper)
+                                        .foregroundStyle(model.paperColor)
                                 } else {
                                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                                         .stroke(model.color.ink.opacity(0.3), lineWidth: 1.1)
@@ -570,7 +570,7 @@ struct StickyDeskCard: View {
             }
             .padding(18)
             .frame(width: DeskCardMetrics.width, height: DeskCardMetrics.height, alignment: .topLeading)
-            .background(model.color.paper, in: RoundedRectangle(cornerRadius: DeskCardMetrics.cornerRadius, style: .continuous))
+            .background(model.paperColor, in: RoundedRectangle(cornerRadius: DeskCardMetrics.cornerRadius, style: .continuous))
             .shadow(color: .black.opacity(hovering ? 0.28 : 0.2), radius: hovering ? 20 : 13, y: hovering ? 12 : 8)
             .scaleEffect(hovering && !reduceMotion ? 1.02 : 1)
             .offset(y: hoverLift)

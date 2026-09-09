@@ -165,11 +165,14 @@ private final class DailyDigestProjection {
         self.sourceStickyByItemID = selection.sourceStickyByItemID
         self.sectionTitles = Dictionary(uniqueKeysWithValues: selection.sections.map { ($0.id, $0.title) })
         self.sectionOrder = selection.sections.map(\.id)
-        let size = NSSize(width: 420, height: 700)
         let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
+        let size = NSSize(
+            width: 420,
+            height: max(StickyWindowGeometry.minimumHeight, visible.height - 80)
+        )
         let frame = NSRect(
             x: visible.midX - size.width / 2,
-            y: visible.midY - size.height / 2,
+            y: visible.minY + 40,
             width: size.width,
             height: size.height
         )
@@ -338,7 +341,19 @@ final class DailyDigestWindowController {
 
     func present() {
         refreshDay()
+        applyTallPresentationFrame()
         NSApp.activate(ignoringOtherApps: true)
         stickyController.focusForTyping()
+    }
+
+    private func applyTallPresentationFrame() {
+        guard let screen = stickyController.panel.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        var frame = stickyController.panel.frame
+        frame.size.height = max(StickyWindowGeometry.minimumHeight, visible.height - 80)
+        frame.origin.y = visible.minY + 40
+        frame = StickyWindowGeometry.runtimeFrame(frame, visibleFrame: visible)
+        stickyController.model.frame = frame
+        stickyController.panel.setFrame(frame, display: true)
     }
 }
