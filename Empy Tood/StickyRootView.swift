@@ -1188,7 +1188,11 @@ struct StickyRootView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if taskPicker != nil {
                         dailyDigestControls
-                            .padding(.top, 14)
+                            // Keep the resting note below the scroll mask's
+                            // fade ramp. Once the user scrolls, this breathing
+                            // room moves away with the content and the fade
+                            // becomes visible only on passing rows.
+                            .padding(.top, 32)
                         Spacer().frame(height: 26)
                     } else {
                         Spacer().frame(height: 26)
