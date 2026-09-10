@@ -199,7 +199,6 @@ private struct DailyDigestSelection {
         for stickyID in manager.order where selectedStickyIDs.contains(stickyID) {
             guard let source = manager.controllers[stickyID]?.model else { continue }
             let selected = source.items.filter(hasText)
-            guard !selected.isEmpty else { continue }
             items.append(contentsOf: selected)
             for item in selected { owners[item.id] = stickyID }
             let title = source.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -260,9 +259,8 @@ private final class DailyDigestProjection {
 
     func save() {
         DailyDigestAppearance.save(colorID: model.colorID, customColorHex: model.customColorHex)
-        let sections = sectionOrder.compactMap { stickyID -> StickyChecklistSection? in
+        let sections = sectionOrder.map { stickyID in
             let ids = model.items.filter { sourceStickyByItemID[$0.id] == stickyID }.map(\.id)
-            guard !ids.isEmpty else { return nil }
             return StickyChecklistSection(id: stickyID, title: sectionTitles[stickyID] ?? "To Do", itemIDs: ids)
         }
         DailyDigestHistory.save(DailyDigestEntry(day: day, note: model.dailyNote,
@@ -291,7 +289,6 @@ private final class DailyDigestProjection {
             let items = source.items.filter {
                 !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
-            guard !items.isEmpty else { return nil }
             return StickyPickerItem(
                 id: stickyID,
                 title: title.isEmpty ? "To Do" : title,
