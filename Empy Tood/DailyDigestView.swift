@@ -23,6 +23,32 @@ private enum DailyDigestHistory {
     }
 }
 
+/// Today is a recurring workspace, so its paper choice belongs to the view
+/// itself instead of one dated digest entry. This keeps both preset and custom
+/// colours stable across closes, relaunches, and day rollover.
+private enum DailyDigestAppearance {
+    private static let colorKey = "today.digestColorID"
+    private static let customColorKey = "today.digestCustomColorHex"
+
+    static var colorID: StickyColor {
+        UserDefaults.standard.string(forKey: colorKey)
+            .flatMap(StickyColor.init(rawValue:)) ?? .cream
+    }
+
+    static var customColorHex: String? {
+        UserDefaults.standard.string(forKey: customColorKey)
+    }
+
+    static func save(colorID: StickyColor, customColorHex: String?) {
+        UserDefaults.standard.set(colorID.rawValue, forKey: colorKey)
+        if let customColorHex {
+            UserDefaults.standard.set(customColorHex, forKey: customColorKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: customColorKey)
+        }
+    }
+}
+
 private enum DailyDigestWindowGeometry {
     private static let defaultsKey = "today.dailyDigestWindowFrame"
     private static let defaultHeight: CGFloat = 680
@@ -153,12 +179,26 @@ private struct DailyDigestSelection {
             selectedIDs = savedIDs.subtracting(excludedIDs)
         }
 
+        // The Today digest is selected at sticky level. Existing saved days
+        // retain their section choices; a fresh day promotes the automatic
+        // task suggestions to their owning stickies, then shows every task in
+        // each chosen sticky.
+        let selectedStickyIDs: Set<UUID>
+        if let saved {
+            selectedStickyIDs = Set(saved.sections.map(\.id))
+        } else {
+            selectedStickyIDs = Set(manager.order.filter { stickyID in
+                guard let source = manager.controllers[stickyID]?.model else { return false }
+                return source.items.contains { selectedIDs.contains($0.id) }
+            })
+        }
+
         var items: [TodoItem] = []
         var owners: [UUID: UUID] = [:]
         var sections: [StickyChecklistSection] = []
-        for stickyID in manager.order {
+        for stickyID in manager.order where selectedStickyIDs.contains(stickyID) {
             guard let source = manager.controllers[stickyID]?.model else { continue }
-            let selected = source.items.filter { selectedIDs.contains($0.id) }
+            let selected = source.items.filter(hasText)
             guard !selected.isEmpty else { continue }
             items.append(contentsOf: selected)
             for item in selected { owners[item.id] = stickyID }
@@ -205,7 +245,8 @@ private final class DailyDigestProjection {
             emoji: nil,
             day: Date(),
             items: selection.items,
-            colorID: .cream,
+            colorID: DailyDigestAppearance.colorID,
+            customColorHex: DailyDigestAppearance.customColorHex,
             fontID: .helvetica,
             frame: frame,
             isVisible: false,
@@ -218,6 +259,7 @@ private final class DailyDigestProjection {
     }
 
     func save() {
+        DailyDigestAppearance.save(colorID: model.colorID, customColorHex: model.customColorHex)
         let sections = sectionOrder.compactMap { stickyID -> StickyChecklistSection? in
             let ids = model.items.filter { sourceStickyByItemID[$0.id] == stickyID }.map(\.id)
             guard !ids.isEmpty else { return nil }
@@ -242,41 +284,42 @@ private final class DailyDigestProjection {
         sourceStickyByItemID[itemID].flatMap { manager.controllers[$0] }
     }
 
-    func pickerCandidates() -> [StickyTaskPickerItem] {
-        let included = Set(model.items.map(\.id))
-        return manager.order.flatMap { stickyID -> [StickyTaskPickerItem] in
-            guard let source = manager.controllers[stickyID]?.model else { return [] }
+    func pickerCandidates() -> [StickyPickerItem] {
+        manager.order.compactMap { stickyID -> StickyPickerItem? in
+            guard let source = manager.controllers[stickyID]?.model else { return nil }
             let title = source.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            return source.items.compactMap { item in
-                guard !item.isDone, !included.contains(item.id),
-                      !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-                return StickyTaskPickerItem(
-                    id: item.id,
-                    item: item,
-                    stickyID: stickyID,
-                    stickyTitle: title.isEmpty ? "To Do" : title
-                )
+            let items = source.items.filter {
+                !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
+            guard !items.isEmpty else { return nil }
+            return StickyPickerItem(
+                id: stickyID,
+                title: title.isEmpty ? "To Do" : title,
+                items: items
+            )
         }
     }
 
-    func registerAddedTask(_ candidate: StickyTaskPickerItem) {
-        if !sectionOrder.contains(candidate.stickyID) { sectionOrder.append(candidate.stickyID) }
-        sourceStickyByItemID[candidate.id] = candidate.stickyID
-        sectionTitles[candidate.stickyID] = candidate.stickyTitle
-        DailyDigestExclusions.include(candidate.id)
+    func setIncluded(_ candidate: StickyPickerItem, included: Bool) {
+        if included {
+            if !sectionOrder.contains(candidate.id) { sectionOrder.append(candidate.id) }
+            sectionTitles[candidate.id] = candidate.title
+            for item in candidate.items { sourceStickyByItemID[item.id] = candidate.id }
+        } else {
+            sectionOrder.removeAll { $0 == candidate.id }
+            sectionTitles.removeValue(forKey: candidate.id)
+            for item in candidate.items { sourceStickyByItemID.removeValue(forKey: item.id) }
+        }
     }
 
     func registerCreatedTask(_ candidate: StickyTaskPickerItem, beside neighborID: UUID, before: Bool) {
         guard let source = manager.controllers[candidate.stickyID]?.model,
               let index = source.items.firstIndex(where: { $0.id == neighborID }) else { return }
-        registerAddedTask(candidate)
+        if !sectionOrder.contains(candidate.stickyID) { sectionOrder.append(candidate.stickyID) }
+        sourceStickyByItemID[candidate.id] = candidate.stickyID
+        sectionTitles[candidate.stickyID] = candidate.stickyTitle
         source.items.insert(candidate.item, at: before ? index : index + 1)
         source.onChange?()
-    }
-
-    func registerRemovedTask(_ candidate: StickyTaskPickerItem) {
-        DailyDigestExclusions.exclude(candidate.id)
     }
 
     func updateSections(_ sections: [StickyChecklistSection]) {
@@ -336,8 +379,9 @@ final class DailyDigestWindowController {
                 projection?.registerCreatedTask(candidate, beside: neighborID, before: before)
             },
             candidates: { [weak projection] in projection?.pickerCandidates() ?? [] },
-            didAdd: { [weak projection] candidate in projection?.registerAddedTask(candidate) },
-            didRemove: { [weak projection] candidate in projection?.registerRemovedTask(candidate) }
+            didSetIncluded: { [weak projection] candidate, included in
+                projection?.setIncluded(candidate, included: included)
+            }
         )
         stickyController = StickyController(
             model: projection.model,
