@@ -107,20 +107,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             manager.hideAll()
             showIntro()
         } else {
-            // Home is the app's default landing window. Individual stickies
-            // keep their persisted visibility, but launching the app always
-            // gives the user an obvious place to start.
-            showHome()
+            // Today is the app's default landing window. Individual stickies
+            // keep their persisted visibility, while Home remains available
+            // from the menu bar and Command-Shift-H.
+            showDailyDigest()
         }
     }
 
-    // Clicking the Dock icon or opening the app again returns to Home.
+    // Clicking the Dock icon or opening the app again returns to Today.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         // Guard against the Dock icon (now always visible) being clicked
-        // mid-onboarding — that shouldn't reveal every sticky and Home
-        // before onboarding's own "Sticky" step gets to do that itself.
+        // mid-onboarding — that shouldn't open Today before onboarding's own
+        // "Sticky" step gets to reveal the app itself.
         guard AppSettings.shared.onboardingCompleted else { return true }
-        showHome()
+        showDailyDigest()
         return true
     }
 
