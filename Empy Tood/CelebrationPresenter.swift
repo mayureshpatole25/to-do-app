@@ -34,6 +34,7 @@ final class CelebrationPresenter {
 
 struct AchievementNotice: View {
     let celebration: Celebration
+    let ink: Color
     let close: () -> Void
     let open: () -> Void
 
@@ -57,10 +58,10 @@ struct AchievementNotice: View {
             }
         }
         .font(.system(size: 12))
-        .foregroundStyle(Color.black.opacity(0.85))
+        .foregroundStyle(ink.opacity(0.85))
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
-        .background(.black.opacity(0.11), in: RoundedRectangle(cornerRadius: 5))
+        .background(ink.opacity(0.11), in: RoundedRectangle(cornerRadius: 5))
     }
 
     private var message: some View {
@@ -71,7 +72,7 @@ struct AchievementNotice: View {
         HStack(spacing: 8) {
             Button("Achievements ↗", action: open)
                 .buttonStyle(.plain)
-                .foregroundStyle(.black.opacity(0.55))
+                .foregroundStyle(ink.opacity(0.55))
                 .fixedSize()
             Button(action: close) {
                 Image(systemName: "xmark")
@@ -80,7 +81,7 @@ struct AchievementNotice: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.black.opacity(0.55))
+            .foregroundStyle(ink.opacity(0.55))
             .accessibilityLabel("Dismiss achievement notification")
         }
     }

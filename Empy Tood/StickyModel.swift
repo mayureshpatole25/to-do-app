@@ -423,6 +423,8 @@ struct StickyRenderedColor {
     let titleInk: Color
     let inkSecondary: Color
     let divider: Color
+    let placeholder: Color
+    let selection: Color
 
     init(paper: Color) {
         self.paper = paper
@@ -431,6 +433,8 @@ struct StickyRenderedColor {
         self.titleInk = foreground
         self.inkSecondary = foreground.opacity(0.48)
         self.divider = foreground.opacity(0.18)
+        self.placeholder = foreground.opacity(0.48)
+        self.selection = foreground.opacity(0.22)
     }
 }
 

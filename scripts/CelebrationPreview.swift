@@ -12,7 +12,7 @@ struct CelebrationPreview {
         window.title = "Tood · Celebration preview"
         window.contentView = NSHostingView(rootView:
             VStack(spacing: 12) {
-                AchievementNotice(celebration: CommandLine.arguments.contains("--streak") ? .streak(6) : .milestone(150), close: {}, open: {})
+                AchievementNotice(celebration: CommandLine.arguments.contains("--streak") ? .streak(6) : .milestone(150), ink: Color(red: 0.125, green: 0.129, blue: 0.118), close: {}, open: {})
                     .environment(\.accessibilityReduceMotion, CommandLine.arguments.contains("--reduced-motion"))
                 Text("Milestone preview").font(.system(size: 16))
             }.frame(width: 360, height: 300).background(Color(red: 0.93, green: 0.92, blue: 0.88)))

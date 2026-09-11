@@ -533,16 +533,25 @@ final class StickyController: NSObject, NSWindowDelegate {
         return index + 1 < model.orderedItems.count
     }
 
-    /// Keeps text selection visually native to the sticky instead of using
-    /// macOS's neutral grey/accent highlight. Blending toward black preserves
-    /// the paper's hue; alpha keeps the selected text comfortably readable.
+    /// Refresh the active native editor when paper changes, including when
+    /// the selection itself has not moved. Called by both sticky view variants.
+    func refreshSelectionStyle() {
+        guard let editor = panel.firstResponder as? NSTextView else { return }
+        applySelectionStyle(to: editor)
+    }
+
+    /// Adaptive ink makes selection lighter on dark paper and darker on light
+    /// paper. Explicit selected-text ink avoids inheriting macOS accent colours.
     private func applySelectionStyle(to editor: NSTextView) {
-        let paper = NSColor(model.paperColor)
-        let darkerPaper = paper.blended(withFraction: 0.30, of: .black) ?? paper
-        let background = darkerPaper.withAlphaComponent(0.50)
+        let palette = model.renderedColor
+        let background = NSColor(palette.selection)
+        let foreground = NSColor(palette.ink)
+        editor.insertionPointColor = foreground
         var attributes = editor.selectedTextAttributes
-        guard attributes[.backgroundColor] as? NSColor != background else { return }
+        guard attributes[.backgroundColor] as? NSColor != background
+            || attributes[.foregroundColor] as? NSColor != foreground else { return }
         attributes[.backgroundColor] = background
+        attributes[.foregroundColor] = foreground
         editor.selectedTextAttributes = attributes
     }
 
