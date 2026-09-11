@@ -161,10 +161,11 @@ private struct StickyTimerControl: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            TextField("5:00", text: $timeText)
+            TextField("5:00", text: $timeText, prompt: Text("5:00").foregroundColor(ink.opacity(0.48)))
                 .textFieldStyle(.plain)
                 .font(font)
                 .foregroundStyle(ink.opacity(0.3))
+                .tint(ink)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 48)
                 .focused($editingTime)
@@ -818,6 +819,9 @@ struct StickyRootView: View {
                     }
             }
         )
+        .tint(color.ink)
+        .onChange(of: model.colorID) { _, _ in controller.refreshSelectionStyle() }
+        .onChange(of: model.customColorHex) { _, _ in controller.refreshSelectionStyle() }
         .contextMenu { contextMenu }
         .onContinuousHover { phase in
             switch phase {
@@ -1016,7 +1020,7 @@ struct StickyRootView: View {
             // Ordinary stickies keep their date above the title. The Today
             // digest uses that space for its focused content instead.
             if let celebration = model.achievementNotice.celebration {
-                AchievementNotice(celebration: celebration,
+                AchievementNotice(celebration: celebration, ink: color.ink,
                     close: { controller.dismissAchievementNotice() },
                     open: { controller.openAchievements() })
             } else if taskPicker == nil {
@@ -1053,7 +1057,8 @@ struct StickyRootView: View {
             // `titleFontSize`) so a single word that can't wrap (no space to
             // break on) shrinks instead of getting cut mid-word ("Admin" →
             // "Admi"/"n").
-            TextField("To Do", text: titleBinding, axis: .vertical)
+            TextField("To Do", text: titleBinding,
+                      prompt: Text("To Do").foregroundColor(color.placeholder), axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.custom("HelveticaNeue", size: titleSize))
                 .tracking(titleSize * -0.06) // -6% of size, same ratio at every step
@@ -1450,7 +1455,7 @@ struct StickyRootView: View {
             TextField("what are we focussing on today", text: Binding(
                 get: { model.dailyNote },
                 set: { model.dailyNote = $0; model.onChange?() }
-            ), axis: .vertical)
+            ), prompt: Text("what are we focussing on today").foregroundColor(color.placeholder), axis: .vertical)
                 .textFieldStyle(.plain)
                 .focused($dailyNoteFocused)
                 .lineLimit(nil)
@@ -1517,7 +1522,8 @@ struct StickyRootView: View {
 
     private var taskPickerContent: some View {
         VStack(spacing: 0) {
-            TextField("Search stickies", text: $taskPickerQuery)
+            TextField("Search stickies", text: $taskPickerQuery,
+                      prompt: Text("Search stickies").foregroundColor(color.placeholder))
                 .textFieldStyle(.plain)
                 .font(bodyFont(14))
                 .foregroundStyle(color.ink.opacity(0.82))
@@ -1531,7 +1537,7 @@ struct StickyRootView: View {
                     highlightedTaskPickerID = filteredStickyPickerItems.first?.id
                 }
 
-            Divider().opacity(0.2)
+            Rectangle().fill(color.divider).frame(height: 1)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -1583,7 +1589,7 @@ struct StickyRootView: View {
             }
             .frame(maxHeight: 290)
 
-            Divider().opacity(0.2)
+            Rectangle().fill(color.divider).frame(height: 1)
 
             HStack {
                 Spacer(minLength: 0)
@@ -2209,6 +2215,10 @@ struct StickyRootView: View {
             }
         }
         .padding(12)
+        // This popover uses native paper, so its fields and selection rings
+        // follow the popover appearance instead of the sticky behind it.
+        .foregroundStyle(Color.primary)
+        .tint(Color.accentColor)
     }
 
     private var customColorPickerButton: some View {
@@ -2234,7 +2244,7 @@ struct StickyRootView: View {
                 )
                 .overlay(Circle().stroke(.black.opacity(0.15), lineWidth: 1))
                 .overlay(
-                    Circle().stroke(color.ink, lineWidth: model.customColorHex == nil ? 0 : 2)
+                    Circle().stroke(Color.primary, lineWidth: model.customColorHex == nil ? 0 : 2)
                         .padding(-3)
                 )
                 .frame(width: 22, height: 22)
@@ -2254,7 +2264,7 @@ struct StickyRootView: View {
                 .frame(width: 22, height: 22)
                 .overlay(Circle().stroke(.black.opacity(0.15), lineWidth: 1))
                 .overlay(
-                    Circle().stroke(color.ink, lineWidth: c == model.color ? 2 : 0)
+                    Circle().stroke(Color.primary, lineWidth: model.customColorHex == nil && c == model.color ? 2 : 0)
                         .padding(-3)
                 )
         }
@@ -3127,7 +3137,7 @@ struct StickyRootView: View {
         guard item.id == displayedItems.first?.id,
               bindingValue(item).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return nil }
-        return Text("Add a to-do…").foregroundStyle(color.ink.opacity(0.32))
+        return Text("Add a to-do…").foregroundColor(color.placeholder)
     }
 
     private func inlineTaskText(_ item: TodoItem, dateRange: NSRange) -> Text {
